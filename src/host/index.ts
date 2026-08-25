@@ -186,6 +186,8 @@ export default SecurityService
 
 export { normalizeConfig, DEFAULT_CONFIG, type SecurityConfig } from './core'
 export { resolvePluginDataRoot, atomicWrite, PLUGIN_DATA_DIR } from './plugin-data'
+export { createEntryServer } from './entry-server'
+export { createProxy } from './proxy'
 export type {
   SecurityEndpoints, SecurityDeps, SecurityStatus, LoginRequest, LoginResult,
   AuditReadRequest, AuditReadResult, AccountSummary, RemoteEnvelope,
