@@ -21,6 +21,7 @@ import { createSessionStore } from './session-store'
 import { createRateLimiter } from './rate-limiter'
 import { createAuditLog } from './audit-log'
 import { createSettingsStore } from './settings-store'
+import { createEntryServer } from './entry-server'
 import { resolvePluginDataRoot, nodeFs } from './plugin-data'
 import { createHostSecurityEndpoints, type SecurityDeps, type SecurityEndpoints } from '../contracts/host-endpoints'
 import { type SecuritySettings } from '../contracts/settings'
@@ -49,7 +50,26 @@ export class SecurityService extends TypertRemoteService {
   constructor(ctx: Context, config: unknown) {
     super(ctx, 'security')
     this.normalizedConfig = normalizeConfig(config)
-    this.endpoints = createHostSecurityEndpoints(this.buildDeps())
+    const deps = this.buildDeps()
+    this.endpoints = createHostSecurityEndpoints(deps)
+    // 装配入口服务器（蓝图 D2/D4——安全入口 + 认证门 + 反向代理）。
+    if (this.normalizedConfig.enabled) {
+      const entry = createEntryServer(deps, {
+        host: this.normalizedConfig.entry.host,
+        port: this.normalizedConfig.entry.port,
+        tlsMode: this.normalizedConfig.entry.tlsMode,
+        certPath: this.normalizedConfig.entry.tls.certPath,
+        keyPath: this.normalizedConfig.entry.tls.keyPath,
+        upstream: this.normalizedConfig.upstream,
+        maxAttempts: this.normalizedConfig.rateLimit.maxAttempts,
+        windowMs: this.normalizedConfig.rateLimit.windowMinutes * 60_000,
+      })
+      // 入口监听是异步的；失败时 logger.warn + 降级（不阻断宿主）。
+      void entry.start().catch((err: unknown) => {
+        this.ctx.logger.warn(err instanceof Error ? err : new Error(String(err)))
+      })
+      ctx.effect(() => () => { void entry.stop() }, 'web-security: entry server')
+    }
   }
 
   /** 装配五模块为结构化 SecurityDeps。 */
@@ -64,7 +84,7 @@ export class SecurityService extends TypertRemoteService {
     // 生命周期：dispose 时 flush 审计残余 + 清理 timer（审计 V19）。
     this.ctx.effect(() => () => audit.dispose(), 'web-security: audit dispose')
 
-    return {
+    const deps: SecurityDeps = {
       // 账号面
       listAccounts: () => accounts.list(),
       verifyPassword: (u, p) => accounts.verifyPassword(u, p),
@@ -96,6 +116,7 @@ export class SecurityService extends TypertRemoteService {
         rpID: cfg.rpID,
       },
     }
+    return deps
   }
 
   // ── @Remote 端点（仅委托；M1 装配后横切审计/限速在 createHostSecurityEndpoints 内）──
