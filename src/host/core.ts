@@ -1,3 +1,6 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
 /**
  * 插件配置规范化（部署方 patch `config` 的解析与校验）。
  *
@@ -27,6 +30,11 @@ export interface SecurityConfig {
   readonly rateLimit: { readonly maxAttempts: number; readonly windowMinutes: number }
   /** 用户设置出厂预设（缺省回退 DEFAULT_SETTINGS）。 */
   readonly defaultSettings: unknown
+  /**
+   * dsh home 根目录（plugin-data 存储定位）。
+   * 解析优先级：config.dshHome → $DSH_HOME → ~/.dsh。
+   */
+  readonly dshHome: string
 }
 
 /** 出厂默认配置（代码内兜底；部署方 patch 可整体覆盖）。 */
@@ -40,6 +48,7 @@ export const DEFAULT_CONFIG: SecurityConfig = {
   session: { ttlMinutes: 480 },
   rateLimit: { maxAttempts: 5, windowMinutes: 15 },
   defaultSettings: undefined,
+  dshHome: '',
 }
 
 function isBoundedNumber(value: unknown, min: number, max: number): value is number {
@@ -109,11 +118,17 @@ export function normalizeConfig(input: unknown): SecurityConfig {
       ? value.enabled
       : (() => { throw new Error('web-security: enabled 必须是布尔值') })()
 
+  // dshHome 解析：config 显式值 → $DSH_HOME → ~/.dsh（平台约定）。
+  const dshHome = typeof value.dshHome === 'string' && value.dshHome.length > 0
+    ? value.dshHome
+    : process.env.DSH_HOME ?? join(homedir(), '.dsh')
+
   return {
     enabled,
     entry: { host, port, tls: { certPath, keyPath } },
     session: { ttlMinutes },
     rateLimit: { maxAttempts, windowMinutes },
     defaultSettings: value.defaultSettings,
+    dshHome,
   }
 }

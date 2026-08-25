@@ -50,12 +50,19 @@ function inRange(value: number, min: number, max: number, field: string): Settin
 }
 
 /**
- * 校验并规范化一份用户设置（非法字段拒绝，绝不静默修正安全策略）。
+ * 校验并规范化一份用户设置。
+ *
+ * 缺省语义：`undefined`/`null` 输入视为「未配置」→ 采用出厂标准档
+ * （defaultSettings 未配置是常态，绝不能因此报错）；
+ * 提供了对象则全字段校验，非法字段拒绝，绝不静默修正安全策略。
  * @param input - 任意结构输入（JSON 解析产物或部署方 preset）。
  * @returns 校验结果；ok 时携带完整字段的设置对象。
  */
 export function validateSettings(input: unknown): SettingsValidation {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+  if (input === undefined || input === null) {
+    return { ok: true, settings: DEFAULT_SETTINGS }
+  }
+  if (typeof input !== 'object' || Array.isArray(input)) {
     return { ok: false, field: 'root', message: '设置必须是对象' }
   }
   const value = input as Record<string, unknown>

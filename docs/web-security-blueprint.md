@@ -25,10 +25,12 @@ dsh（DeepSeek Harness）的 web-ui 目前监听 `127.0.0.1:3080`，**没有任�
 |---|---|---|
 | HTTP 服务器 | `dsh-host-webserver`：exact/prefix 路由 + 唯一 fallback 座位 + index 注入 | **无中间件/认证钩子** |
 | RPC（`/api`） | `connection` 注册 prefix `/api`；`typertGateway` 独占唯一 interceptor | **插件无法在 /api 上再挂认证拦截**（重复注册即抛错） |
-| WebSocket | `connection` 注册 `/api/events.mux`、`/api/events.host` 两个 upgrade 路由 | upgrade 表按 exact path 唯一，同样无法拦截 |
-| 静态 SPA | `frontend-static` 独占 fallback 座位 | 插件不可抢占 |
-| 跨站围栏 | `isTrustedApiRequest`：Host fence + Origin fence + Fetch-Metadata | 只防 DNS rebinding/跨站，**不是认证**；非 loopback 权威需配置 `trustedHosts` |
-| 部署配置面 | profile `cordis.patch.yml` 支持 `- id: <row> config: {...}` 整配置覆盖；CLI `--trusted-host` | `trustedHosts` 值的官方来源 |
+| 特权方法 | `PRIVILEGED_METHODS`（settings.update/mutate、credentials.*、host.openPath 等 14 个）额外经**空信任表**校验，**钉死 loopback Host** | 配置 `trustedHosts` 也无法让远程访问使用这些方法 |
+| WebSocket | `connection` 注册 `/api/events.mux`、`/api/events.host` 两个 upgrade 路由，handler 内同样过信任围栏 | upgrade 表按 exact path 唯一，同样无法拦截 |
+| 静态 SPA | `frontend-static` 独占 fallback 座位（仅 GET/HEAD） | 插件不可抢占 |
+| 跨站围栏 | `isTrustedApiRequest`：Host fence + Origin fence + Fetch-Metadata | 只防 DNS rebinding/跨站，**不是认证** |
+| LAN 自动信任 | web 绑定 `0.0.0.0` 时，CLI 把本机 LAN IPv4 字面量自动并入 `trustedHosts`（`resolveLanTrust`） | LAN 设备可**绕过任何插件认证直连 3080 API**（宿主行为，插件只能警告） |
+| 部署配置面 | profile `cordis.patch.yml` 支持 `- id: <row> config: {...}` 整配置覆盖；CLI `--trusted-host` | 围栏权威的官方来源（本插件方案下不再需要，见 D4） |
 
 **核心推论**：认证**无法**寄生在 3080 的请求链上。安全入口只能在「传输层之上、宿主之外」——
 插件自持一个 HTTPS 入口，认证通过后将流量反向代理到 loopback 3080。
@@ -38,9 +40,9 @@ dsh（DeepSeek Harness）的 web-ui 目前监听 `127.0.0.1:3080`，**没有任�
 flowchart LR
     U["公网用户/浏览器"] -->|HTTPS| E["插件安全入口<br/>0.0.0.0:3443"]
     E -->|认证门| L["登录页<br/>/security/*"]
-    E -->|已认证会话| P["反向代理转发"]
-    P -->|"HTTP + WebSocket upgrade<br/>Host 保留外部权威"| H["dsh 宿主<br/>127.0.0.1:3080<br/>（仅 loopback）"]
-    E -.->|诊断/警告| H
+    E -->|已认证会话| P["反向代理转发<br/>Host/Origin 归一化 loopback"]
+    P -->|"HTTP + WebSocket upgrade<br/>呈现为本机流量"| H["dsh 宿主<br/>127.0.0.1:3080<br/>（仅 loopback）"]
+    E -.->|"3080 非 loopback 时红色警告"| H
 ```
 
 ---
@@ -67,12 +69,29 @@ flowchart LR
 - 登录限速：IP + 用户名双维度失败计数，指数退避锁定；
 - 审计：`audit.jsonl`（登录成败、登出、账号变更、安全配置变更），文件名白名单 + 原子写。
 
-### 3.4 决策 D4：trustedHosts 为部署必需项
+### 3.4 决策 D4：代理对上游「归一化为本机流量」（而非保留外部 Host）
 
-代理转发时 **Host 头保留外部权威**（如 `myhost.example:3443`），否则浏览器的
-Origin fence（`origin.host === host.host`）会拒绝一切跨端口 API 请求。
-部署方通过 `dsh --profile web --trusted-host <外部权威>` 或 profile patch 配置；
-插件登录页/设置界面提供配置诊断（探测 `ctx.webServer` 路由可达性）。
+> 二次复审修订：初版方案是「Host 保留外部权威 + 部署方配置 `trustedHosts`」。
+> 复核宿主源码后否决——`connection` 对 `PRIVILEGED_METHODS`（settings.update、
+> credentials.* 等 14 个方法）额外经**空信任表**校验，**钉死 loopback**：即使配了
+> trustedHosts，远程登录用户也无法使用设置界面等特权功能，直接违背本插件
+> 「配置在 dsh 设置界面完成」的核心需求。
+
+采用**上游归一化代理**：认证通过后，转发时把请求呈现为标准本机流量——
+
+- `Host` 改写为上游权威（`127.0.0.1:<port>`）→ Host fence 与特权方法的
+  空信任表检查均按 loopback 通过；
+- 浏览器附带的 `Origin` 改写为与改写后 Host 同源 → Origin fence 通过；
+- `sec-fetch-site` 非 cross-site（浏览器对同站 API 本就不发 cross-site）；
+- 补充 `X-Forwarded-For/Proto/Host` 传递真实来源（审计与日志用）。
+
+安全性论证：围栏的防御目标（DNS rebinding、跨站请求）在入口层已由**认证门**
+承担——未认证流量根本到不了转发器；能穿过认证门的流量等价于「已认证的本机
+用户」。3080 视角一切请求来自 loopback socket + loopback Host，与本机浏览器
+访问完全同构。
+
+收益：**部署零配置**（无需 `--trusted-host` 或 patch 覆盖 connection row）、
+特权方法全可用、上游视角单一。
 
 ### 3.5 决策 D5：登录页为独立零框架 bundle
 
@@ -197,9 +216,25 @@ gitGraph
 
 1. **自签证书 vs WebAuthn**：passkey 要求 secure context，自签证书需用户手动信任；
    生产建议提供受信证书路径（Let's Encrypt 等）。M3 文档化。
-2. **3080 裸露**：若部署方把 webserver 绑到 `0.0.0.0`，插件无法强制回收——设置界面
-   红色警告 + 文档强调「安全入口模式下 3080 必须保持 loopback」。
-3. **trustedHosts 摩擦**：这是部署必需项，尝试在 M4 提供「自动配置向导」
-   （patch 覆盖 connection row，整配置替换——需用户确认，避免踩踏其自有覆盖）。
+2. **3080 裸露 = LAN 自动放行**：部署方把 webserver 绑到 `0.0.0.0` 时，宿主 CLI
+   会把本机 LAN IPv4 字面量**自动并入 `trustedHosts`**（`resolveLanTrust`）——
+   LAN 内设备可绕过本插件认证门直连 3080 API。插件无法回收该行为，只能：
+   设置界面红色警告 + 文档强调「安全入口模式下 3080 必须保持 loopback 绑定」。
+3. **本机信任边界不变**：3080 上的 `security` 管理端点（账号/设置）对本机进程
+   开放且无认证——这与 dsh 现状一致（本机任何进程本就能控制 agent、读写会话）。
+   本插件的威胁模型是「外部访问者」，不收窄本机信任边界；如需收窄属后续版本。
 4. **入口端口占用**：默认 3443 可配；启动失败（占用/TLS 错误）明确报错并降级为「仅诊断」。
 5. **多实例/profile 冲突**：入口服务器按 profile 隔离，`plugin-data` 按插件名隔离（平台约定）。
+
+---
+
+## 九、M1 待办清单（含二次复审遗留项）
+
+| 项 | 说明 |
+|---|---|
+| mergeSettings 双源合并 | `validateSettings` 现为全量校验语义；settings.json 的「部分字段覆盖」需按字段合并 + 逐字段校验（蓝图 D6 承诺的语义） |
+| 无参端点 SRC 实测 | 骨架的 status/logout/accountsList/settingsRead 为无参 `@Remote`——宿主与 dsh-git-ui 均无无参先例；M1 实测 LIB 校验与 Gateway 分发，必要时统一补空 request 参数 |
+| 取消信号合并 | 端点实现接 `AbortSignal.any([deps.signal, requestSignal])`（指南 6.3 契约） |
+| zod strict 镜像 | client 侧 descriptor 镜像 + 「解析 host 样本」同步测试（指南 7.2） |
+| smoke-host.mjs | 构建后真实宿主载荷冒烟（package.json 已移除引用，随 M1 补回 script 与文件） |
+| 入口服务器生命周期 | enabled=false 时不监听；启动失败降级诊断面（D2/M2 联动） |

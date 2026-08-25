@@ -30,11 +30,24 @@ declare module '@deepseek-ai/dsh-host-webserver' {
     handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
   }
 
-  /** 结构化 index 注入行（登录门脚本注入用）。 */
-  export interface IndexInjection {
-    readonly placement: 'head' | 'body'
-    readonly html: string
-  }
+  /** 注入行落点：head 或 body 开标签之后。 */
+  export type IndexInjectionPlacement = 'head' | 'body'
+
+  /**
+   * 结构化 index 注入行（kind 判别联合，形状抄自宿主 injections.ts）。
+   * 登录门脚本注入用 `script-src`（外链脚本）或 `script`（内联）。
+   */
+  export type IndexInjection =
+    /** 向 `globalThis` 赋一个 JSON 可序列化值（先于后续 script 行）。 */
+    | { kind: 'global'; name: string; value: unknown }
+    /** 内联经典脚本；text 不得含 `</script`。 */
+    | { kind: 'script'; placement: IndexInjectionPlacement; text: string }
+    /** 外链经典脚本，按表序执行。 */
+    | { kind: 'script-src'; placement: IndexInjectionPlacement; src: string }
+    /** head 内 `<style>` 元素。 */
+    | { kind: 'style'; text: string }
+    /** 原始 HTML 片段。 */
+    | { kind: 'html'; placement: IndexInjectionPlacement; html: string }
 
   /** 浏览器 HTTP 载体服务：路由注册表 + fallback 座位 + index 注入。 */
   export class WebServer extends Service {

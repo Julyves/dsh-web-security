@@ -73,14 +73,16 @@ export interface SecurityDeps {
 /**
  * 安全端点工厂：为宿主壳装配纯业务实现。
  *
- * 骨架阶段返回占位实现（status 真实、登录类端点返回未实现错误码）；
- * M1 起按模块（account-store/session-store/rate-limiter/audit-log）填充。
+ * 骨架阶段返回占位实现（登录类端点返回占位错误码）；
+ * M1 起按模块（account-store/session-store/rate-limiter/audit-log）填充，
+ * status 的 entry 信息届时从规范化配置（deps 扩展）取真实值。
  */
 export function createHostSecurityEndpoints(
   deps: SecurityDeps,
 ): SecurityEndpoints {
   return {
     async status() {
+      // 占位：entry 三元组为骨架示意，M1 起从规范化配置与入口服务器实际状态取值。
       return {
         enabled: true,
         hasAccounts: false,

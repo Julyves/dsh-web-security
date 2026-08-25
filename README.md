@@ -13,7 +13,9 @@ dsh web 默认只监听 `127.0.0.1:3080` 且无认证层。公网部署时若直
 
 - 高安全性登录界面（密码 + 通行密钥 WebAuthn）；
 - TLS 入口 + 会话 Cookie（HttpOnly/Secure/SameSite=Strict）+ 登录限速 + 审计日志；
-- 反向代理：认证通过后透明转发 HTTP 与 WebSocket 到 `127.0.0.1:3080`；
+- 反向代理：认证通过后将请求**归一化为本机流量**转发到 `127.0.0.1:3080`
+  （Host/Origin 改写为 loopback 形态——宿主对特权 RPC 方法的 loopback 钉死
+  因此照常可用，且部署无需配置 `trustedHosts`）；
 - 设置界面集中管理安全策略。
 
 ## 架构
@@ -27,6 +29,8 @@ flowchart LR
 ```
 
 未认证请求只见登录页；`/api` 与 WebSocket 全部处于认证门之后（curl 直连亦不可得）。
+
+> `./client` 导出是浏览器注入专用入口（ModuleLoader 闭包格式），非 Node 消费面。
 
 ## 开发
 

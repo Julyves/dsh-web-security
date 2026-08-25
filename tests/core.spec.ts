@@ -1,10 +1,12 @@
 /**
- * normalizeConfig 纯函数单测（无宿主依赖）。
+ * 纯函数单测（无宿主依赖）：normalizeConfig 与 validateSettings。
  *
- * 覆盖：默认值兜底、非法字段大声失败、TLS 证书成对校验、区间钳制拒绝。
+ * 覆盖：默认值兜底、缺省即默认档语义、非法字段大声失败、
+ * TLS 证书成对校验、区间钳制拒绝。
  */
 import { describe, expect, it } from 'vitest'
 import { normalizeConfig, DEFAULT_CONFIG } from '../src/host/core'
+import { validateSettings, DEFAULT_SETTINGS } from '../src/contracts/settings'
 
 describe('normalizeConfig', () => {
   it('空输入回退出厂默认配置', () => {
@@ -24,6 +26,14 @@ describe('normalizeConfig', () => {
     expect(config.entry.port).toBe(8443)
     expect(config.session.ttlMinutes).toBe(120)
     expect(config.rateLimit.maxAttempts).toBe(3)
+  })
+
+  it('dshHome 缺省时解析为 $DSH_HOME 或 ~/.dsh', () => {
+    expect(normalizeConfig({}).dshHome).toMatch(/\.dsh$/)
+    const withEnv = normalizeConfig({})
+    expect(withEnv.dshHome!.length).toBeGreaterThan(0)
+    const explicit = normalizeConfig({ dshHome: '/data/dsh-home' })
+    expect(explicit.dshHome).toBe('/data/dsh-home')
   })
 
   it('非法 entry.host 大声失败', () => {
@@ -50,5 +60,44 @@ describe('normalizeConfig', () => {
     const preset = { passwordLogin: false }
     const config = normalizeConfig({ defaultSettings: preset })
     expect(config.defaultSettings).toEqual(preset)
+  })
+})
+
+describe('validateSettings', () => {
+  it('未配置（undefined/null）回退出厂标准档——绝不能报错', () => {
+    // 回归守护：defaultSettings 未配置是部署常态，settingsRead 必须可用。
+    expect(validateSettings(undefined)).toEqual({ ok: true, settings: DEFAULT_SETTINGS })
+    expect(validateSettings(null)).toEqual({ ok: true, settings: DEFAULT_SETTINGS })
+  })
+
+  it('完整合法设置透传', () => {
+    const settings = {
+      passwordLogin: true,
+      passkeyLogin: false,
+      sessionTtlMinutes: 60,
+      maxLoginAttempts: 3,
+      rateLimitWindowMinutes: 10,
+      auditEnabled: true,
+    }
+    expect(validateSettings(settings)).toEqual({ ok: true, settings })
+  })
+
+  it('非法类型逐字段拒绝', () => {
+    expect(validateSettings({ ...DEFAULT_SETTINGS, passwordLogin: 'yes' }).ok).toBe(false)
+    expect(validateSettings({ ...DEFAULT_SETTINGS, sessionTtlMinutes: 1 }).ok).toBe(false)
+    expect(validateSettings({ ...DEFAULT_SETTINGS, maxLoginAttempts: 0 }).ok).toBe(false)
+    expect(validateSettings({ ...DEFAULT_SETTINGS, auditEnabled: null }).ok).toBe(false)
+  })
+
+  it('缺少字段拒绝（全量校验语义；部分合并由 M1 的 mergeSettings 承担）', () => {
+    const partial = { passwordLogin: true }
+    const result = validateSettings(partial)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.field).toBe('passkeyLogin')
+  })
+
+  it('非对象输入拒绝', () => {
+    expect(validateSettings('settings').ok).toBe(false)
+    expect(validateSettings([1]).ok).toBe(false)
   })
 })
