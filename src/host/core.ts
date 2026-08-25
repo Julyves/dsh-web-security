@@ -32,6 +32,13 @@ export interface SecurityConfig {
     readonly host: '0.0.0.0' | '127.0.0.1'
     readonly port: number
     readonly tls: EntryTlsConfig
+    /** TLS 模式：'https'（用户证书）| 'http'（明文，开发/测试用）。 */
+    readonly tlsMode: 'https' | 'http'
+  }
+  /** 上游 dsh 宿主地址（反向代理目标）。 */
+  readonly upstream: {
+    readonly host: string
+    readonly port: number
   }
   /** 会话策略预设（M1 生效）。 */
   readonly session: { readonly ttlMinutes: number }
@@ -58,7 +65,9 @@ export const DEFAULT_CONFIG: SecurityConfig = {
     host: '0.0.0.0',
     port: 3443,
     tls: { certPath: null, keyPath: null },
+    tlsMode: 'http',
   },
+  upstream: { host: '127.0.0.1', port: 3080 },
   session: { ttlMinutes: 480 },
   rateLimit: { maxAttempts: 5, windowMinutes: 15 },
   defaultSettings: undefined,
@@ -121,6 +130,7 @@ export function normalizeConfig(input: unknown): SecurityConfig {
   const session = (value.session ?? {}) as Record<string, unknown>
   const rateLimit = (value.rateLimit ?? {}) as Record<string, unknown>
   const tls = (entry.tls ?? {}) as Record<string, unknown>
+  const upstream = (value.upstream ?? {}) as Record<string, unknown>
 
   const host = requireEnum(entry.host, ['127.0.0.1', '0.0.0.0'] as const,
     DEFAULT_CONFIG.entry.host, 'entry.host')
@@ -131,6 +141,19 @@ export function normalizeConfig(input: unknown): SecurityConfig {
   if ((certPath === null) !== (keyPath === null)) {
     throw new Error('web-security: entry.tls.certPath 与 keyPath 必须同时提供或同时为 null')
   }
+  // tlsMode：有证书 → 'https'；无证书 → 'http'（可被 entry.tlsMode 显式覆盖）。
+  const tlsMode = requireEnum(entry.tlsMode, ['https', 'http'] as const,
+    certPath !== null ? 'https' : 'http', 'entry.tlsMode')
+  if (tlsMode === 'https' && certPath === null) {
+    throw new Error('web-security: entry.tlsMode=https 但未提供 certPath/keyPath')
+  }
+
+  // upstream：缺省回退 DEFAULT_CONFIG（127.0.0.1:3080）。
+  const upstreamHost = typeof upstream.host === 'string' && upstream.host.length > 0
+    ? upstream.host
+    : DEFAULT_CONFIG.upstream.host
+  const upstreamPort = requireBoundedNumber(upstream.port, 1, 65535,
+    DEFAULT_CONFIG.upstream.port, 'upstream.port')
 
   const ttlRange = SETTINGS_RANGES.sessionTtlMinutes
   const ttlMinutes = requireBoundedNumber(session.ttlMinutes, ttlRange.min, ttlRange.max,
@@ -152,7 +175,8 @@ export function normalizeConfig(input: unknown): SecurityConfig {
 
   return {
     enabled,
-    entry: { host, port, tls: { certPath, keyPath } },
+    entry: { host, port, tls: { certPath, keyPath }, tlsMode },
+    upstream: { host: upstreamHost, port: upstreamPort },
     session: { ttlMinutes },
     rateLimit: { maxAttempts, windowMinutes },
     defaultSettings: value.defaultSettings,
