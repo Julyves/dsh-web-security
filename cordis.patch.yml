@@ -24,6 +24,10 @@
           tls:
             certPath: null
             keyPath: null
+          tlsMode: 'http'
+        upstream:
+          host: '127.0.0.1'
+          port: 3080
         session:
           ttlMinutes: 480
         rateLimit:
