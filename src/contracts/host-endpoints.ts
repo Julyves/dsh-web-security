@@ -14,8 +14,8 @@ import type { SecuritySettings } from './settings'
 export interface SecurityStatus {
   /** 安全入口是否启用。 */
   readonly enabled: boolean
-  /** 是否已初始化账号（未初始化 → 前端显示初始化向导而非登录表单）。 */
-  readonly hasAccounts: boolean
+  /** 是否已初始化账号（未认证请求返回 null，不泄露初始化状态——审计 M1）。 */
+  readonly hasAccounts: boolean | null
   /** 允许的登录方式。 */
   readonly methods: { readonly password: boolean; readonly passkey: boolean }
   /** 入口监听信息（host/port/tls 形态），仅元信息，不含私钥。 */
@@ -58,13 +58,13 @@ export interface AuditReadResult {
 
 /** 安全端点依赖注入面（M1 实现时由宿主壳装配）。 */
 export interface SecurityDeps {
-  /** 账号校验（用户名+密码是否正确）。 */
+  /** 账号校验（用户名+密码是否正确；不存在用户名执行假校验——审计 S3）。 */
   verifyPassword(username: string, password: string): Promise<boolean>
-  /** 登录限速判定（失败时由调用方登记）。 */
-  loginGate(ip: string, username: string): Promise<LoginGate>
-  /** 登记一次失败尝试。 */
-  recordFailure(ip: string, username: string): Promise<void>
-  /** 登记认证事件（审计）。 */
+  /** 登录限速判定（username 维度——IP 维度归 M2 代理层，审计 S2）。 */
+  loginGate(username: string): Promise<LoginGate>
+  /** 登记一次失败（username 维度）。 */
+  recordFailure(username: string): Promise<void>
+  /** 登记认证事件（审计；安全降级操作如 settingsWrite 也应触发——审计 M2）。 */
   recordEvent(event: AuthEvent): void
   /** 读取当前设置。 */
   readSettings(): SecuritySettings

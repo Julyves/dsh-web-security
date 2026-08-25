@@ -44,6 +44,11 @@ export interface SecurityConfig {
    * 优先级：config.dshHome → $DSH_HOME → ~/.dsh。normalizeConfig 必然填充。
    */
   readonly dshHome: string
+  /**
+   * WebAuthn RP ID（M3 passkey 用；部署域名根，如 'sec.example.com'）。
+   * M1 预留，缺省为空串（passkey 未启用）。
+   */
+  readonly rpID: string
 }
 
 /** 出厂默认配置（代码内兜底；部署方 patch 可整体覆盖）。 */
@@ -59,6 +64,8 @@ export const DEFAULT_CONFIG: SecurityConfig = {
   defaultSettings: undefined,
   // 仅类型占位：normalizeConfig 的每个返回分支都会填入真实解析值。
   dshHome: '',
+  // M1 预留：M3 passkey 用；缺省空串（未启用）。
+  rpID: '',
 }
 
 /** 枚举校验：不在白名单即抛错；undefined 回退默认值。 */
@@ -150,5 +157,6 @@ export function normalizeConfig(input: unknown): SecurityConfig {
     rateLimit: { maxAttempts, windowMinutes },
     defaultSettings: value.defaultSettings,
     dshHome,
+    rpID: typeof value.rpID === 'string' && value.rpID.length > 0 ? value.rpID : '',
   }
 }

@@ -41,12 +41,13 @@ export const DEFAULT_SETTINGS: SecuritySettings = {
  *
  * 用户设置（SecuritySettings）与部署方预设（SecurityConfig.session/rateLimit）
  * 是同一组策略的两个配置层，区间必须共用本表——防止两处校验各自漂移。
+ * 范围收紧为安全插件可接受的上下界（审计见 docs/security-audit-m1.md M7）。
  */
 export const SETTINGS_RANGES = {
-  /** 会话时长（分钟）：5 分钟 – 30 天。 */
-  sessionTtlMinutes: { min: 5, max: 60 * 24 * 30 },
-  /** 登录失败锁定阈值（次数）。 */
-  maxLoginAttempts: { min: 1, max: 100 },
+  /** 会话时长（分钟）：5 分钟 – 7 天。 */
+  sessionTtlMinutes: { min: 5, max: 10080 },
+  /** 登录失败锁定阈值（次数）：3–10（安全插件不应允许超过 10 次失败）。 */
+  maxLoginAttempts: { min: 3, max: 10 },
   /** 失败窗口（分钟）：1 – 24 小时。 */
   rateLimitWindowMinutes: { min: 1, max: 24 * 60 },
 } as const

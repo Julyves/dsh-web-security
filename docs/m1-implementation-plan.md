@@ -65,7 +65,7 @@ git-ui 混合使用：查询类直接返回业务类型；存储/预设类用 `R
 - 登录类（login）→ `LoginResult` 判别联合（已是 ok 信封形态）
 - 写入类（accountCreate/settingsWrite 等新增端点）→ `RemoteEnvelope<T>` 包裹
 
-### D-M1-4：accounts.json 数据结构
+### D-M1-4：accounts.json 数据结构与密码安全
 
 ```jsonc
 {
@@ -89,6 +89,17 @@ git-ui 混合使用：查询类直接返回业务类型；存储/预设类用 `R
 `migrateAccounts` 机制（开发阶段无兼容包袱，但为将来留结构）。passkey 凭证
 位预留（M3 填充 `{ credentialId, publicKey, counter, transports }`）。
 
+**安全要求**（审计见 docs/security-audit-m1.md S3/M4/M5）：
+
+- **假校验防用户名枚举**（S3）：`verifyPassword` 在用户名不存在时执行一次
+  假 scrypt（用固定 DUMMY_SALT/DUMMY_PARAMS 哈希后丢弃结果），保证响应
+  时间与真实校验一致——不泄露用户名存在性。
+- **密码强度**（M4）：最小 12 字符 + 至少 1 数字 1 符号（OWASP 2023）；
+  长度上限 1024 字节（防内存耗尽）。
+- **用户名字符集**（M5）：`/^[a-zA-Z0-9_-]{1,64}$/`（create/update 时
+  校验）——防审计日志/设置界面渲染的存储型 XSS 面。
+- **恒定时间比较**：`crypto.timingSafeEqual` 比较哈希。
+
 ### D-M1-5：session-store 设计
 
 - 会话 token：`randomBytes(32)` → base64url（256 bit）
@@ -96,18 +107,38 @@ git-ui 混合使用：查询类直接返回业务类型；存储/预设类用 `R
 - TTL：**滑动续期**（每次访问更新 lastAccessAt；超过 ttlMinutes 清理）
 - 清理：惰性（每次 login/logout 时扫一次过期项）+ 定时（`setInterval` 5 分钟）
 - **重启失效**（内存态，安全默认——迫使重新登录，不残留长期会话）
+- **单会话默认**（审计 M3）：create 时**撤销同 username 的旧会话**（防会话
+  堆积 + 多设备登录无感知）；`maxSessionsPerUser` 可配置（默认 1，允许多
+  设备时调高）
 - Cookie 签发：`dsh_web_security_session=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=<ttlSeconds>`（ttlMinutes × 60）
 - Cookie 解析：从 `Cookie` 头解析 token → 查表 → 续期或拒绝
 
 ### D-M1-6：rate-limiter 设计
 
-- 内存 `Map<key, { failures: number, firstFailAt: number, lockedUntil: number }>`
-- key：**组合** `${ip}:${username}`（双维度——防止某 IP 换用户名绕过，
-  也防止单用户名被多 IP 撞库时过早锁定合法用户）
+> 审计修正（S2）：typert gateway 的 `dispatchRpc(endpoint, payload, signal)`
+> 只传业务参数 + 信号，**不传 HTTP 层客户端 IP**。`@Remote` 方法无法获取
+> 请求 IP——IP 维度限速在端点层**不可实现**。限速分层：
+
+| 层 | 维度 | 实现 | 数据来源 |
+|---|---|---|---|
+| M2 代理层 | IP + 全局 | HTTP 中间件 | socket 远端 / X-Forwarded-For |
+| M1 端点层 | username | `@Remote` 方法 | request.username（业务参数） |
+
+- 内存 `Map<username, { failures: number, firstFailAt: number, lockedUntil: number }>`
 - 策略：`windowMinutes` 内 `maxAttempts` 次失败 → 锁定，**指数退避**
   （首次 1 min，逐次翻倍，上限 1 小时）
 - `locked` 状态返回 `retryAfterMs`（剩余锁定时间）
 - 清理：`windowMinutes` 过期后重置计数
+- **接口签名修正**：`gate(username)` / `recordFailure(username)` /
+  `recordSuccess(username)`——**无 IP 参数**（IP 维度归 M2 代理层）
+
+```ts
+export interface RateLimiter {
+  gate(username: string): LoginGate
+  recordFailure(username: string): void
+  recordSuccess(username: string): void
+}
+```
 
 ### D-M1-7：audit-log 设计
 
@@ -136,10 +167,16 @@ git-ui 混合使用：查询类直接返回业务类型；存储/预设类用 `R
 
 | 端点 | 可见性 | 说明 |
 |---|---|---|
-| status | public | 登录页需要诊断信息 |
+| status | public | 登录页需要诊断信息；**不返回 hasAccounts**（审计 M1） |
 | login | public | 未认证用户登录入口 |
 | passkeyLoginBegin/Complete（M3） | public | 通行密钥登录入口 |
-| logout / accountsList / accountCreate / accountUpdatePassword / accountRemove / settingsRead / settingsWrite / auditRead / passkeyRegister*（M3） | authenticated | 认证后可用 |
+| logout / accountsList / accountUpdatePassword / accountRemove / settingsRead / settingsWrite / auditRead / passkeyRegister*（M3） | authenticated | 认证后可用 |
+| accountCreate | **loopback-only** | **首次初始化悖论（审计 S1）**：仅 loopback 可调（部署方本机 CLI 初始化首个管理员），公网永不暴露初始化入口——防 TOCTOU 抢先初始化 |
+
+**首次初始化策略**（S1 方案 A，最安全）：部署方在本机通过 loopback 调
+`accountCreate` 创建首个管理员账号（`dsh` CLI 或 curl localhost:3080）。
+公网入口只服务已初始化的部署。status 端点对未认证请求返回
+`hasAccounts: null`（不泄露初始化状态）。
 
 ### D-M1-10：验证策略——独立测试 profile
 

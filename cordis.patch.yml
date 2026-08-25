@@ -12,6 +12,7 @@
 #   upstream         上游 dsh 宿主；缺省读取 ctx.webServer 实际监听值
 #   session/rateLimit 等安全策略预设项在 M1 随实现逐步生效
 #   （审计开关等用户可调项在 settings schema，经设置界面配置）
+#   rpID: 部署域名根（M3 passkey 用，如 'sec.example.com'；缺省不启用 passkey）
 - insert:
     - id: web-security
       name: dsh-web-security
@@ -28,3 +29,4 @@
         rateLimit:
           maxAttempts: 5
           windowMinutes: 15
+        rpID: ''
