@@ -1,0 +1,29 @@
+# dsh-web-security bundle patch: 为 dsh web-ui 提供外部安全访问入口。
+# 单行同时激活包的双半：宿主半（默认导出 = SecurityService）与浏览器半
+# （dsh.client manifest）。
+#
+# 注意：row 的 `name` 必须等于包名——它是 loader entry id 与 client bundle
+# URL（/plugins/<name>/client.js）的依据。
+#
+# 配置约定（部署方可按 id 覆盖整 config）：
+#   enabled          安全入口总开关（默认 true）
+#   entry.host/port  入口监听地址；默认 0.0.0.0:3443（TLS 终止 + 认证门）
+#   entry.tls        TLS 证书路径；缺省生成自签证书（passkey 需受信证书）
+#   upstream         上游 dsh 宿主；缺省读取 ctx.webServer 实际监听值
+#   session/rateLimit/audit 等安全策略项在 M1 随实现逐步补齐
+- insert:
+    - id: web-security
+      name: dsh-web-security
+      config:
+        enabled: true
+        entry:
+          host: '0.0.0.0'
+          port: 3443
+          tls:
+            certPath: null
+            keyPath: null
+        session:
+          ttlMinutes: 480
+        rateLimit:
+          maxAttempts: 5
+          windowMinutes: 15

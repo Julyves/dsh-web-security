@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["es2024", "dom"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
+    "paths": {
+      "@deepseek-ai/cordis": ["./src/adapters/dsh/types/cordis.d.ts"],
+      "@deepseek-ai/dsh-typert-protocol": ["./src/adapters/dsh/types/typert-protocol.d.ts"],
+      "@deepseek-ai/dsh-host-webserver": ["./src/adapters/dsh/types/webserver.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "types/**/*.d.ts"]
+}

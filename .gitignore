@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.npm-cache/
+
+# Build output
+lib/
+dist/
+*.tsbuildinfo
+
+# Packaging
+*.tgz
+
+# Tests
+coverage/
+.vitest/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Logs
+*.log
+
+# Debug captures
+*.har
+.wiki/
+
+# AI Agent
+AGENT.md
+.claude/
+.agent/
+.mimocode/
+.codegraph/
+.workbuddy/
+
+# Release
+release/
+
+# Scripts (local-only, not tracked)
+scripts/
+
