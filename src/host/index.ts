@@ -16,14 +16,21 @@
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { Context } from '@deepseek-ai/cordis'
 import { normalizeConfig, type SecurityConfig } from './core'
+import { createAccountStore } from './account-store'
+import { createSessionStore } from './session-store'
+import { createRateLimiter } from './rate-limiter'
+import { createAuditLog } from './audit-log'
+import { createSettingsStore } from './settings-store'
+import { resolvePluginDataRoot, nodeFs } from './plugin-data'
 import { createHostSecurityEndpoints, type SecurityDeps, type SecurityEndpoints } from '../contracts/host-endpoints'
-import {
-  validateSettings,
-  type SecuritySettings,
-} from '../contracts/settings'
+import { type SecuritySettings } from '../contracts/settings'
 import type {
-  AccountSummary, AuditReadRequest, AuditReadResult, LoginRequest, LoginResult, SecurityStatus,
+  AccountCreateRequest, AccountRemoveRequest, AccountSummary, AccountUpdatePasswordRequest,
+  AuditReadRequest, AuditReadResult, LoginRequest, LoginResult, RemoteEnvelope,
+  SecurityStatus, SettingsReadRequest, SettingsWriteRequest,
+  StatusRequest, LogoutRequest, AccountsListRequest,
 } from '../contracts/host-endpoints'
+import type { AuthEvent } from '../contracts/auth-events'
 
 /**
  * 安全 Remote 服务：Cordis 壳。
@@ -36,7 +43,7 @@ export class SecurityService extends TypertRemoteService {
   static inject = ['webServer']
 
   private readonly endpoints: SecurityEndpoints
-  /** 规范化后的插件配置（M1 起供账号/会话/入口模块装配）。 */
+  /** 规范化后的插件配置（供账号/会话/入口模块装配）。 */
   private readonly normalizedConfig: SecurityConfig
 
   constructor(ctx: Context, config: unknown) {
@@ -45,65 +52,110 @@ export class SecurityService extends TypertRemoteService {
     this.endpoints = createHostSecurityEndpoints(this.buildDeps())
   }
 
-  /** 将配置规范化产物适配为结构化 SecurityDeps（M1 起替换为真实模块）。 */
+  /** 装配五模块为结构化 SecurityDeps。 */
   private buildDeps(): SecurityDeps {
+    const cfg = this.normalizedConfig
+    const dataRoot = resolvePluginDataRoot(cfg.dshHome)
+    const accounts = createAccountStore(nodeFs, dataRoot)
+    const sessions = createSessionStore(cfg.session.ttlMinutes)
+    const rl = createRateLimiter(cfg.rateLimit.maxAttempts, cfg.rateLimit.windowMinutes * 60_000)
+    const audit = createAuditLog(nodeFs, dataRoot, true)
+    const settings = createSettingsStore(nodeFs, dataRoot, cfg.defaultSettings)
+
     return {
-      verifyPassword: async () => false,
-      loginGate: async () => ({ state: 'allowed' }),
-      recordFailure: async () => {},
-      recordEvent: () => {},
-      readSettings: () => {
-        // 出厂预设优先：patch config.defaultSettings 非法时大声失败
-        // （与 normalizeConfig 策略一致，绝不静默修正安全策略）。
-        const preset = validateSettings(this.normalizedConfig.defaultSettings)
-        if (!preset.ok) {
-          throw new Error(`web-security: defaultSettings 非法（${preset.field}: ${preset.message}）`)
-        }
-        return preset.settings
+      // 账号面
+      listAccounts: () => accounts.list(),
+      verifyPassword: (u, p) => accounts.verifyPassword(u, p),
+      createAccount: (u, p) => accounts.create(u, p),
+      updatePassword: (u, c, n) => accounts.updatePassword(u, c, n),
+      removeAccount: (u) => accounts.remove(u),
+      hasAccounts: () => accounts.hasAny(),
+      // 限速面
+      loginGate: async (u) => rl.gate(u),
+      recordFailure: async (u) => rl.recordFailure(u),
+      recordSuccess: async (u) => rl.recordSuccess(u),
+      // 会话面
+      createSession: (u, ip) => sessions.create(u, ip),
+      resolveSession: (token) => {
+        const e = sessions.resolve(token)
+        return e === undefined ? undefined : { username: e.username }
+      },
+      revokeSession: (token) => sessions.revoke(token),
+      // 审计面
+      recordEvent: (e: AuthEvent) => audit.append(e),
+      readAudit: (offset, limit) => audit.read(offset, limit),
+      // 设置面
+      readSettings: () => settings.read(),
+      writeSettings: (partial) => settings.write(partial),
+      // 配置面
+      config: {
+        enabled: cfg.enabled,
+        entry: { host: cfg.entry.host, port: cfg.entry.port, tls: cfg.entry.tls.certPath !== null ? 'custom' : 'self-signed' },
+        rpID: cfg.rpID,
       },
     }
   }
 
+  // ── @Remote 端点（仅委托；M1 装配后横切审计/限速在 createHostSecurityEndpoints 内）──
+
   /** 状态与部署诊断。 */
   @Remote('status')
-  async status(signal?: AbortSignal): Promise<SecurityStatus> {
-    void signal
-    return this.endpoints.status()
+  async status(request: StatusRequest): Promise<SecurityStatus> {
+    return this.endpoints.status(request)
   }
 
   /** 密码登录。 */
   @Remote('login')
   async login(request: LoginRequest, signal?: AbortSignal): Promise<LoginResult> {
-    void signal
-    return this.endpoints.login(request)
+    return this.endpoints.login(request, signal)
   }
 
   /** 登出当前会话。 */
   @Remote('logout')
-  async logout(signal?: AbortSignal): Promise<void> {
-    void signal
-    return this.endpoints.logout()
+  async logout(request: LogoutRequest): Promise<void> {
+    return this.endpoints.logout(request)
   }
 
   /** 账号列表（仅元数据）。 */
   @Remote('accountsList')
-  async accountsList(signal?: AbortSignal): Promise<readonly AccountSummary[]> {
-    void signal
-    return this.endpoints.accountsList()
+  async accountsList(request: AccountsListRequest): Promise<readonly AccountSummary[]> {
+    return this.endpoints.accountsList(request)
+  }
+
+  /** 创建账号（仅 loopback——审计 S1 首次初始化策略）。 */
+  @Remote('accountCreate')
+  async accountCreate(request: AccountCreateRequest): Promise<RemoteEnvelope<void>> {
+    return this.endpoints.accountCreate(request)
+  }
+
+  /** 修改密码。 */
+  @Remote('accountUpdatePassword')
+  async accountUpdatePassword(request: AccountUpdatePasswordRequest): Promise<RemoteEnvelope<void>> {
+    return this.endpoints.accountUpdatePassword(request)
+  }
+
+  /** 删除账号。 */
+  @Remote('accountRemove')
+  async accountRemove(request: AccountRemoveRequest): Promise<RemoteEnvelope<void>> {
+    return this.endpoints.accountRemove(request)
+  }
+
+  /** 读取当前安全设置。 */
+  @Remote('settingsRead')
+  async settingsRead(request: SettingsReadRequest): Promise<SecuritySettings> {
+    return this.endpoints.settingsRead(request)
+  }
+
+  /** 写入安全设置（部分字段覆盖；触发 settings-changed 审计）。 */
+  @Remote('settingsWrite')
+  async settingsWrite(request: SettingsWriteRequest): Promise<RemoteEnvelope<SecuritySettings>> {
+    return this.endpoints.settingsWrite(request)
   }
 
   /** 审计日志读取（分页）。 */
   @Remote('auditRead')
   async auditRead(request: AuditReadRequest, signal?: AbortSignal): Promise<AuditReadResult> {
-    void signal
-    return this.endpoints.auditRead(request)
-  }
-
-  /** 读取当前安全设置。 */
-  @Remote('settingsRead')
-  async settingsRead(signal?: AbortSignal): Promise<SecuritySettings> {
-    void signal
-    return this.endpoints.settingsRead()
+    return this.endpoints.auditRead(request, signal)
   }
 }
 
@@ -113,6 +165,8 @@ export { normalizeConfig, DEFAULT_CONFIG, type SecurityConfig } from './core'
 export { resolvePluginDataRoot, atomicWrite, PLUGIN_DATA_DIR } from './plugin-data'
 export type {
   SecurityEndpoints, SecurityDeps, SecurityStatus, LoginRequest, LoginResult,
-  AuditReadRequest, AuditReadResult, AccountSummary,
+  AuditReadRequest, AuditReadResult, AccountSummary, RemoteEnvelope,
+  AccountCreateRequest, AccountUpdatePasswordRequest, AccountRemoveRequest,
+  SettingsWriteRequest,
 } from '../contracts/host-endpoints'
 export type { SecuritySettings } from '../contracts/settings'
