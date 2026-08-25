@@ -89,9 +89,11 @@ describe('createSessionStore', () => {
 })
 
 describe('parseSessionToken', () => {
+  const validToken = 'a'.repeat(43) // base64url(32 bytes) = 43 chars
+
   it('从 Cookie 头解析 token', () => {
-    const cookie = `${SESSION_COOKIE_NAME}=abc123; other=xyz`
-    expect(parseSessionToken(cookie)).toBe('abc123')
+    const cookie = `${SESSION_COOKIE_NAME}=${validToken}; other=xyz`
+    expect(parseSessionToken(cookie)).toBe(validToken)
   })
 
   it('无 Cookie 头返回 undefined', () => {
@@ -103,7 +105,17 @@ describe('parseSessionToken', () => {
   })
 
   it('多 cookie 正确提取', () => {
-    const cookie = `a=1; ${SESSION_COOKIE_NAME}=tok456; b=2`
-    expect(parseSessionToken(cookie)).toBe('tok456')
+    const cookie = `a=1; ${SESSION_COOKIE_NAME}=${validToken}; b=2`
+    expect(parseSessionToken(cookie)).toBe(validToken)
+  })
+
+  it('过短 token 拒绝（防超长 DoS——审计 V7）', () => {
+    const cookie = `${SESSION_COOKIE_NAME}=short; other=xyz`
+    expect(parseSessionToken(cookie)).toBeUndefined()
+  })
+
+  it('过长 token 拒绝', () => {
+    const cookie = `${SESSION_COOKIE_NAME}=${'x'.repeat(200)}; other=xyz`
+    expect(parseSessionToken(cookie)).toBeUndefined()
   })
 })

@@ -36,8 +36,9 @@ describe('zod 镜像同步', () => {
       .toEqual({ username: 'admin', password: 'pass' })
   })
 
-  it('loginResult：ok=true 分支', () => {
-    expect(loginResultSchema.parse({ ok: true })).toEqual({ ok: true })
+  it('loginResult：ok=true 分支（含 cookie）', () => {
+    const r = loginResultSchema.parse({ ok: true, cookie: 'dsh_web_security_session=abc; Path=/' })
+    expect(r.ok).toBe(true)
   })
 
   it('loginResult：ok=false locked 分支', () => {

@@ -104,7 +104,10 @@ export function parseSessionToken(cookieHeader: string | undefined): string | un
     const trimmed = part.trim()
     const eq = trimmed.indexOf('=')
     if (eq > 0 && trimmed.slice(0, eq) === SESSION_COOKIE_NAME) {
-      return trimmed.slice(eq + 1)
+      const value = trimmed.slice(eq + 1)
+      // 长度限制：base64url(32 bytes) = 43 chars，允许 ±5 容差（防超长 DoS——审计 V7）。
+      if (value.length < 38 || value.length > 128) return undefined
+      return value
     }
   }
   return undefined

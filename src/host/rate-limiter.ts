@@ -61,6 +61,12 @@ export function createRateLimiter(maxAttempts: number, windowMs: number): {
     if (entry.lockedUntil > t) {
       return { state: 'locked', retryAfterMs: entry.lockedUntil - t }
     }
+    // 锁定已过期 → lockoutCount 衰减（防永久锁定 DoS——审计 V9）：
+    // 每次锁定过期后减半，允许合法用户在安静期后恢复。
+    if (entry.lockoutCount > 0 && entry.lockedUntil !== 0 && entry.lockedUntil <= t) {
+      entry.lockoutCount = Math.floor(entry.lockoutCount / 2)
+      if (entry.lockoutCount === 0) entry.lockedUntil = 0
+    }
     return { state: 'allowed' }
   }
 

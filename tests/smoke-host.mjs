@@ -55,7 +55,8 @@ try {
   // login → 正确密码
   const loginResult = await svc.login({ username: 'admin', password: 'SecurePass123!' })
   if (!loginResult.ok) throw new Error(`login 失败: ${JSON.stringify(loginResult)}`)
-  console.log('✅ login 正确密码成功')
+  if (!loginResult.cookie) throw new Error('login 成功但未返回 cookie')
+  console.log('✅ login 正确密码成功 + cookie 已签发')
 
   // login → 错误密码
   const failResult = await svc.login({ username: 'admin', password: 'WrongPass123!' })

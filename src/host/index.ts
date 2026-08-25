@@ -59,8 +59,10 @@ export class SecurityService extends TypertRemoteService {
     const accounts = createAccountStore(nodeFs, dataRoot)
     const sessions = createSessionStore(cfg.session.ttlMinutes)
     const rl = createRateLimiter(cfg.rateLimit.maxAttempts, cfg.rateLimit.windowMinutes * 60_000)
-    const audit = createAuditLog(nodeFs, dataRoot, true)
     const settings = createSettingsStore(nodeFs, dataRoot, cfg.defaultSettings)
+    const audit = createAuditLog(nodeFs, dataRoot, settings.read().auditEnabled)
+    // 生命周期：dispose 时 flush 审计残余 + 清理 timer（审计 V19）。
+    this.ctx.effect(() => () => audit.dispose(), 'web-security: audit dispose')
 
     return {
       // 账号面

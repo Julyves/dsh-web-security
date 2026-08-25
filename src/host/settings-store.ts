@@ -88,11 +88,20 @@ export function createSettingsStore(
       // 文件不存在 → existing 保持 undefined。
     }
     // 合并：existing（磁盘 user） + partial（本次写入） → 新 user。
-    const mergedUser: Record<string, unknown> = {}
+    // Object.create(null) 防原型污染（审计 V15）。
+    const mergedUser: Record<string, unknown> = Object.create(null)
     if (typeof existing === 'object' && existing !== null) {
-      Object.assign(mergedUser, existing)
+      for (const key of Object.keys(existing)) {
+        if (key !== '__proto__' && key !== 'constructor' && key !== 'prototype') {
+          mergedUser[key] = (existing as Record<string, unknown>)[key]
+        }
+      }
     }
-    Object.assign(mergedUser, partial)
+    for (const key of Object.keys(partial)) {
+      if (key !== '__proto__' && key !== 'constructor' && key !== 'prototype') {
+        mergedUser[key] = (partial as Record<string, unknown>)[key]
+      }
+    }
     // 再与 preset + fallback 合并 + 校验。
     const r = mergeSettings(preset, mergedUser, DEFAULT_SETTINGS)
     if (!r.ok) {

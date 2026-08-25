@@ -30,7 +30,7 @@ export const loginRequestSchema = z.object({
 })
 
 export const loginResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(true), cookie: z.string() }),
   z.object({ ok: z.literal(false), code: z.enum(['bad-credentials', 'locked']), retryAfterMs: z.number().optional() }),
 ])
 

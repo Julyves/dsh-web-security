@@ -29,11 +29,14 @@ export function createAuditLog(fs: PluginDataFs, root: string, enabled: boolean)
   append: (event: AuthEvent) => void
   read: (offset: number, limit: number) => Promise<{ events: readonly AuthEvent[]; hasMore: boolean }>
   flush: () => Promise<void>
+  dispose: () => void
 } {
   /** 内存缓冲（待落盘的事件）。 */
   const buffer: AuthEvent[] = []
   /** 定时 flush 句柄。 */
   let flushTimer: ReturnType<typeof setInterval> | undefined
+  /** flush 互斥锁：防并发 read-modify-write 丢审计（审计 V11）。 */
+  let flushInFlight: Promise<void> | undefined
   const auditPath = join(root, AUDIT_FILE)
 
   if (enabled) {
@@ -55,10 +58,26 @@ export function createAuditLog(fs: PluginDataFs, root: string, enabled: boolean)
   }
 
   async function flush(): Promise<void> {
+    // 互斥锁：如果已有 flush 在途，等待它完成后重试（拾取新缓冲）。
+    if (flushInFlight !== undefined) {
+      await flushInFlight
+      // 递归重试：如果在等待期间有新事件入缓冲，再 flush 一次。
+      if (buffer.length > 0) return flush()
+      return
+    }
+    flushInFlight = doFlush()
+    try {
+      await flushInFlight
+    } finally {
+      flushInFlight = undefined
+    }
+  }
+
+  async function doFlush(): Promise<void> {
     if (buffer.length === 0) return
     // 取出当前缓冲（快照），清空后异步写。
     const batch = buffer.splice(0, buffer.length)
-    // 读取现有文件内容 + 追加新行（非整文件原子写——追加模式）。
+    // 读取现有文件内容 + 追加新行。
     let existing = ''
     try {
       existing = await fs.readFile(auditPath)
@@ -99,16 +118,18 @@ export function createAuditLog(fs: PluginDataFs, root: string, enabled: boolean)
     return { events: slice, hasMore: end < events.length }
   }
 
-  // dispose 时清理 timer（M1 由 SecurityService 生命周期调用 flush）。
-  const origFlush = flush
   return {
     append,
     read,
-    flush: origFlush,
+    flush,
+    dispose: () => {
+      if (flushTimer !== undefined) clearInterval(flushTimer)
+      void flush().catch(() => {})
+    },
   }
 }
 
-/** 销毁审计日志：flush 残余 + 清理 timer。 */
+/** 兼容旧接口（已弃用，用返回的 dispose）。 */
 export function disposeAuditLog(log: { flush: () => Promise<void> }): void {
   void log.flush().catch(() => {})
 }

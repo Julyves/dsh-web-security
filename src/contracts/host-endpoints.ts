@@ -53,7 +53,7 @@ export interface LoginRequest {
 
 /** 密码登录结果。 */
 export type LoginResult =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly cookie: string }
   | { readonly ok: false; readonly code: 'bad-credentials' | 'locked'; readonly retryAfterMs?: number }
 
 /** 账号摘要（绝不含哈希/盐）。 */
@@ -184,7 +184,10 @@ export function createHostSecurityEndpoints(
       }
       await deps.recordSuccess(request.username)
       deps.recordEvent({ kind: 'login-success', at: Date.now(), actor: request.username })
-      return { ok: true }
+      // 创建会话并返回 cookie（M2 代理层 Set-Cookie）。
+      // IP 用 'loopback' 占位（typert 端点无法获取客户端 IP——审计 S2）。
+      const { cookie } = deps.createSession(request.username, 'loopback')
+      return { ok: true, cookie }
     },
 
     async logout(_request: LogoutRequest): Promise<void> {
