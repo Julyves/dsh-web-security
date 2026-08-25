@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 /** 插件数据目录名（与包名一致，平台约定隔离）。 */
@@ -30,6 +30,8 @@ export interface PluginDataFs {
   mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>
   writeFile(path: string, data: string, options?: { flag?: string; mode?: number }): Promise<void>
   rename(from: string, to: string): Promise<void>
+  /** 读取文件内容（UTF-8）。 */
+  readFile(path: string): Promise<string>
 }
 
 /** 默认 fs 实现（生产路径）。 */
@@ -37,6 +39,7 @@ export const nodeFs: PluginDataFs = {
   mkdir: (path, options) => mkdir(path, options),
   writeFile: (path, data, options) => writeFile(path, data, options),
   rename: (from, to) => rename(from, to),
+  readFile: (path) => readFile(path, 'utf8'),
 }
 
 /**
