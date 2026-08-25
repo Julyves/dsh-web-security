@@ -6,7 +6,7 @@
  * 纯逻辑层）。职责：
  *   1. 将 Cordis Context 与宿主服务（webServer 等）适配为结构化注入面；
  *   2. 调用 `normalizeConfig` 校验部署方配置；
- *   3. 经 `createHostSecurityEndpoints(deps, config)` 获得纯业务端点；
+ *   3. 经 `createHostSecurityEndpoints(deps)` 获得纯业务端点；
  *   4. 以 `@Remote` 装饰器将端点暴露给 typert Gateway。
  *
  * M1：账号库/会话管理/限速器/审计日志装配进 deps，端点实现真实化。
@@ -17,9 +17,13 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { Context } from '@deepseek-ai/cordis'
 import { normalizeConfig, type SecurityConfig } from './core'
 import { createHostSecurityEndpoints, type SecurityDeps, type SecurityEndpoints } from '../contracts/host-endpoints'
-import type { AuditReadRequest, AuditReadResult, LoginRequest, LoginResult, SecurityStatus, AccountSummary } from '../contracts/host-endpoints'
-import type { SecuritySettings } from '../contracts/settings'
-import { validateSettings } from '../contracts/settings'
+import {
+  validateSettings,
+  type SecuritySettings,
+} from '../contracts/settings'
+import type {
+  AccountSummary, AuditReadRequest, AuditReadResult, LoginRequest, LoginResult, SecurityStatus,
+} from '../contracts/host-endpoints'
 
 /**
  * 安全 Remote 服务：Cordis 壳。
@@ -38,12 +42,11 @@ export class SecurityService extends TypertRemoteService {
   constructor(ctx: Context, config: unknown) {
     super(ctx, 'security')
     this.normalizedConfig = normalizeConfig(config)
-    this.endpoints = createHostSecurityEndpoints(this.buildDeps(ctx))
+    this.endpoints = createHostSecurityEndpoints(this.buildDeps())
   }
 
-  /** 将 Cordis 服务适配为结构化 SecurityDeps（M1 起替换为真实模块）。 */
-  private buildDeps(ctx: Context): SecurityDeps {
-    void ctx
+  /** 将配置规范化产物适配为结构化 SecurityDeps（M1 起替换为真实模块）。 */
+  private buildDeps(): SecurityDeps {
     return {
       verifyPassword: async () => false,
       loginGate: async () => ({ state: 'allowed' }),
@@ -107,7 +110,7 @@ export class SecurityService extends TypertRemoteService {
 export default SecurityService
 
 export { normalizeConfig, DEFAULT_CONFIG, type SecurityConfig } from './core'
-export { resolvePluginDataRoot, isAllowedFileName, atomicWrite, PLUGIN_DATA_DIR } from './plugin-data'
+export { resolvePluginDataRoot, atomicWrite, PLUGIN_DATA_DIR } from './plugin-data'
 export type {
   SecurityEndpoints, SecurityDeps, SecurityStatus, LoginRequest, LoginResult,
   AuditReadRequest, AuditReadResult, AccountSummary,

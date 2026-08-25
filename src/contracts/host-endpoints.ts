@@ -1,7 +1,7 @@
 /**
  * 安全端点纯接口（typert `security` 命名空间的业务面）。
  *
- * 与框架无关：实现接受注入依赖的工厂 `createHostSecurityEndpoints(deps, config)`
+ * 与框架无关：实现接受注入依赖的工厂 `createHostSecurityEndpoints(deps)`
  * 返回本接口——宿主壳只做 Cordis/typert 适配，业务逻辑全部在此面之下。
  * 端点请求/响应类型必须能在浏览器侧做 zod strict 镜像（见 client/remote.ts，
  * M1 起实现；SRC 反射要求方法参数名保持 `request`、末位 `signal`）。
@@ -24,7 +24,7 @@ export interface SecurityStatus {
     readonly port: number
     readonly tls: 'self-signed' | 'custom' | 'none'
   }
-  /** 部署诊断（trustedHosts 必配项检查结果）。 */
+  /** 部署诊断（如 3080 非 loopback 绑定警告、TLS 形态提示）。 */
   readonly diagnostics: readonly string[]
 }
 
@@ -70,6 +70,22 @@ export interface SecurityDeps {
   readSettings(): SecuritySettings
 }
 
+/** 安全端点完整接口（宿主 @Remote 逐一委托的方法面）。 */
+export interface SecurityEndpoints {
+  /** 状态与部署诊断。 */
+  status(): Promise<SecurityStatus>
+  /** 密码登录（M1 起实现真实校验与限速）。 */
+  login(request: LoginRequest): Promise<LoginResult>
+  /** 登出当前会话。 */
+  logout(): Promise<void>
+  /** 账号列表（仅元数据）。 */
+  accountsList(): Promise<readonly AccountSummary[]>
+  /** 审计日志读取（分页）。 */
+  auditRead(request: AuditReadRequest): Promise<AuditReadResult>
+  /** 读取当前安全设置。 */
+  settingsRead(): Promise<SecuritySettings>
+}
+
 /**
  * 安全端点工厂：为宿主壳装配纯业务实现。
  *
@@ -105,20 +121,4 @@ export function createHostSecurityEndpoints(
       return deps.readSettings()
     },
   }
-}
-
-/** 安全端点完整接口（宿主 @Remote 逐一委托的方法面）。 */
-export interface SecurityEndpoints {
-  /** 状态与部署诊断。 */
-  status(): Promise<SecurityStatus>
-  /** 密码登录（M1 起实现真实校验与限速）。 */
-  login(request: LoginRequest): Promise<LoginResult>
-  /** 登出当前会话。 */
-  logout(): Promise<void>
-  /** 账号列表（仅元数据）。 */
-  accountsList(): Promise<readonly AccountSummary[]>
-  /** 审计日志读取（分页）。 */
-  auditRead(request: AuditReadRequest): Promise<AuditReadResult>
-  /** 读取当前安全设置。 */
-  settingsRead(): Promise<SecuritySettings>
 }

@@ -36,12 +36,27 @@ export const DEFAULT_SETTINGS: SecuritySettings = {
   auditEnabled: true,
 }
 
+/**
+ * 安全策略数值区间的**单一来源**。
+ *
+ * 用户设置（SecuritySettings）与部署方预设（SecurityConfig.session/rateLimit）
+ * 是同一组策略的两个配置层，区间必须共用本表——防止两处校验各自漂移。
+ */
+export const SETTINGS_RANGES = {
+  /** 会话时长（分钟）：5 分钟 – 30 天。 */
+  sessionTtlMinutes: { min: 5, max: 60 * 24 * 30 },
+  /** 登录失败锁定阈值（次数）。 */
+  maxLoginAttempts: { min: 1, max: 100 },
+  /** 失败窗口（分钟）：1 – 24 小时。 */
+  rateLimitWindowMinutes: { min: 1, max: 24 * 60 },
+} as const
+
 /** 字段级校验结果；非法字段给出可读原因。 */
 export type SettingsValidation =
   | { readonly ok: true; readonly settings: SecuritySettings }
   | { readonly ok: false; readonly field: string; readonly message: string }
 
-/** 数值区间的通用钳制（骨架期策略：非法即拒绝，不静默修正）。 */
+/** 数值区间的通用钳制（非法即拒绝，不静默修正；区间取值见 SETTINGS_RANGES）。 */
 function inRange(value: number, min: number, max: number, field: string): SettingsValidation | undefined {
   if (!Number.isFinite(value) || value < min || value > max) {
     return { ok: false, field, message: `${field} 必须位于 ${min}–${max} 区间` }
@@ -81,9 +96,9 @@ export function validateSettings(input: unknown): SettingsValidation {
 
   const invalid =
     boolField('passwordLogin') ?? boolField('passkeyLogin') ?? boolField('auditEnabled')
-    ?? numberField('sessionTtlMinutes', 5, 60 * 24 * 30)
-    ?? numberField('maxLoginAttempts', 1, 100)
-    ?? numberField('rateLimitWindowMinutes', 1, 24 * 60)
+    ?? numberField('sessionTtlMinutes', SETTINGS_RANGES.sessionTtlMinutes.min, SETTINGS_RANGES.sessionTtlMinutes.max)
+    ?? numberField('maxLoginAttempts', SETTINGS_RANGES.maxLoginAttempts.min, SETTINGS_RANGES.maxLoginAttempts.max)
+    ?? numberField('rateLimitWindowMinutes', SETTINGS_RANGES.rateLimitWindowMinutes.min, SETTINGS_RANGES.rateLimitWindowMinutes.max)
   if (invalid !== undefined) return invalid
 
   return {

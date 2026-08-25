@@ -69,10 +69,4 @@ declare module '@deepseek-ai/dsh-host-webserver' {
     renderIndex(html: string): string
     constructor(ctx: Context, config: { host: '127.0.0.1' | '0.0.0.0'; port: number })
   }
-
-  /** webserver 配置 schema。 */
-  export const Config: {
-    host: '127.0.0.1' | '0.0.0.0'
-    port: number
-  }
 }

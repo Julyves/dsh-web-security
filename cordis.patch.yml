@@ -10,7 +10,8 @@
 #   entry.host/port  入口监听地址；默认 0.0.0.0:3443（TLS 终止 + 认证门）
 #   entry.tls        TLS 证书路径；缺省生成自签证书（passkey 需受信证书）
 #   upstream         上游 dsh 宿主；缺省读取 ctx.webServer 实际监听值
-#   session/rateLimit/audit 等安全策略项在 M1 随实现逐步补齐
+#   session/rateLimit 等安全策略预设项在 M1 随实现逐步生效
+#   （审计开关等用户可调项在 settings schema，经设置界面配置）
 - insert:
     - id: web-security
       name: dsh-web-security

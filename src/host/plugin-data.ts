@@ -9,17 +9,16 @@
 
 import { randomUUID } from 'node:crypto'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 /** 插件数据目录名（与包名一致，平台约定隔离）。 */
 export const PLUGIN_DATA_DIR = 'dsh-web-security'
 
-/** 可写文件白名单（防路径穿越；新增文件必须先注册）。 */
-export const ALLOWED_FILE_NAMES = new Set(['accounts.json', 'settings.json', 'audit.jsonl'])
-
-/** 文件大小上限（字节）：账号/设置 1 MiB，审计 64 MiB。 */
-export const MAX_FILE_BYTES: Readonly<Record<string, number>> = {
+/**
+ * 可写文件清单的**单一来源**：文件名 → 大小上限（字节）。
+ * 白名单即本表键集；新增可写文件必须先在此注册。
+ */
+export const FILE_LIMITS: Readonly<Record<string, number>> = {
   'accounts.json': 1024 * 1024,
   'settings.json': 1024 * 1024,
   'audit.jsonl': 64 * 1024 * 1024,
@@ -42,21 +41,21 @@ export const nodeFs: PluginDataFs = {
 
 /**
  * 解析插件数据根目录。
- * @param dshHome - 配置里的 dshHome（可选）。
+ * @param dshHome - dsh home 根目录（由 normalizeConfig 解析填充，必填）。
  * @returns 插件数据根绝对路径。
  */
-export function resolvePluginDataRoot(dshHome: string | undefined): string {
-  const home = dshHome ?? process.env.DSH_HOME ?? join(homedir(), '.dsh')
-  return resolve(home, 'plugin-data', PLUGIN_DATA_DIR)
+export function resolvePluginDataRoot(dshHome: string): string {
+  return resolve(dshHome, 'plugin-data', PLUGIN_DATA_DIR)
 }
 
 /**
- * 校验文件名是否可写（白名单 + 无路径分隔符）。
+ * 校验文件名是否可写（白名单内且无路径分隔符——后者为纵深防御，
+ * 白名单本身已隐含裸文件名）。
  * @param name - 裸文件名。
  * @returns 是否允许。
  */
 export function isAllowedFileName(name: string): boolean {
-  return ALLOWED_FILE_NAMES.has(name) && !name.includes('/') && !name.includes('\\')
+  return name in FILE_LIMITS && !name.includes('/') && !name.includes('\\')
 }
 
 /**
@@ -73,8 +72,8 @@ export async function atomicWrite(
   content: string,
 ): Promise<void> {
   if (!isAllowedFileName(name)) throw new Error(`web-security: 非白名单文件名 ${JSON.stringify(name)}`)
-  const maxBytes = MAX_FILE_BYTES[name]
-  if (maxBytes !== undefined && Buffer.byteLength(content, 'utf8') > maxBytes) {
+  const maxBytes = FILE_LIMITS[name]!
+  if (Buffer.byteLength(content, 'utf8') > maxBytes) {
     throw new Error(`web-security: 文件 ${name} 超过大小上限`)
   }
   await fs.mkdir(root, { recursive: true })

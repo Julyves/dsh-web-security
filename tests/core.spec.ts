@@ -4,14 +4,27 @@
  * 覆盖：默认值兜底、缺省即默认档语义、非法字段大声失败、
  * TLS 证书成对校验、区间钳制拒绝。
  */
-import { describe, expect, it } from 'vitest'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { normalizeConfig, DEFAULT_CONFIG } from '../src/host/core'
 import { validateSettings, DEFAULT_SETTINGS } from '../src/contracts/settings'
 
+/** 测试内复现 core.ts 的 home 兜底期望值（$DSH_HOME 未设置时）。 */
+const expectedDefaultHome = (): string => join(homedir(), '.dsh')
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
+
 describe('normalizeConfig', () => {
-  it('空输入回退出厂默认配置', () => {
+  it('空输入回退出厂默认配置，且 dshHome 被真实解析', () => {
+    // 回归守护：undefined 输入与 {} 必须同路——dshHome 等运行时解析
+    // 字段不允许泄漏 DEFAULT_CONFIG 的空串占位。
     const config = normalizeConfig(undefined)
-    expect(config).toEqual({ ...DEFAULT_CONFIG, defaultSettings: undefined })
+    expect(config.enabled).toBe(DEFAULT_CONFIG.enabled)
+    expect(config.entry).toEqual(DEFAULT_CONFIG.entry)
+    expect(config.dshHome).toBe(expectedDefaultHome())
   })
 
   it('合法字段透传并保持原值', () => {
@@ -28,12 +41,13 @@ describe('normalizeConfig', () => {
     expect(config.rateLimit.maxAttempts).toBe(3)
   })
 
-  it('dshHome 缺省时解析为 $DSH_HOME 或 ~/.dsh', () => {
-    expect(normalizeConfig({}).dshHome).toMatch(/\.dsh$/)
-    const withEnv = normalizeConfig({})
-    expect(withEnv.dshHome!.length).toBeGreaterThan(0)
-    const explicit = normalizeConfig({ dshHome: '/data/dsh-home' })
-    expect(explicit.dshHome).toBe('/data/dsh-home')
+  it('dshHome 解析优先级：config 显式值 → $DSH_HOME → ~/.dsh（空串视为未设置）', () => {
+    expect(normalizeConfig({ dshHome: '/data/dsh-home' }).dshHome).toBe('/data/dsh-home')
+    vi.stubEnv('DSH_HOME', '/env/dsh-home')
+    expect(normalizeConfig({}).dshHome).toBe('/env/dsh-home')
+    expect(normalizeConfig({ dshHome: '/data/dsh-home' }).dshHome).toBe('/data/dsh-home')
+    vi.stubEnv('DSH_HOME', '')
+    expect(normalizeConfig({}).dshHome).toBe(expectedDefaultHome())
   })
 
   it('非法 entry.host 大声失败', () => {

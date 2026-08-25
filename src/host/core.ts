@@ -1,11 +1,14 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { SETTINGS_RANGES } from '../contracts/settings'
 
 /**
  * 插件配置规范化（部署方 patch `config` 的解析与校验）。
  *
  * 与框架无关的纯函数；`normalizeConfig` 对任意结构输入做字段级校验，
  * 非法即抛错（「错误配置大声失败」，绝不静默修正安全策略）。
+ * 数值区间引用 `SETTINGS_RANGES`（contracts/settings）单一来源，
+ * 与用户设置 schema 的同名字段共用同一区间，防止漂移。
  */
 
 /** 入口 TLS 形态：certPath/keyPath 均为 null → 自签；二者齐全 → 用户证书。 */
@@ -14,7 +17,13 @@ export interface EntryTlsConfig {
   readonly keyPath: string | null
 }
 
-/** 插件配置（与 cordis.patch.yml 的 config 结构一致）。 */
+/**
+ * 插件配置（与 cordis.patch.yml 的 config 结构一致）。
+ *
+ * session/rateLimit 是部署方预设层；用户设置（SecuritySettings）的同名
+ * 字段是用户覆盖层——M1 的 mergeSettings 定义「用户值 → 部署预设 → 标准档」
+ * 的合并优先级。
+ */
 export interface SecurityConfig {
   /** 安全入口总开关。 */
   readonly enabled: boolean
@@ -24,15 +33,15 @@ export interface SecurityConfig {
     readonly port: number
     readonly tls: EntryTlsConfig
   }
-  /** 会话策略（M1 生效）。 */
+  /** 会话策略预设（M1 生效）。 */
   readonly session: { readonly ttlMinutes: number }
-  /** 登录限速策略（M1 生效）。 */
+  /** 登录限速策略预设（M1 生效）。 */
   readonly rateLimit: { readonly maxAttempts: number; readonly windowMinutes: number }
   /** 用户设置出厂预设（缺省回退 DEFAULT_SETTINGS）。 */
   readonly defaultSettings: unknown
   /**
-   * dsh home 根目录（plugin-data 存储定位）。
-   * 解析优先级：config.dshHome → $DSH_HOME → ~/.dsh。
+   * dsh home 根目录（plugin-data 存储定位的唯一解析点）。
+   * 优先级：config.dshHome → $DSH_HOME → ~/.dsh。normalizeConfig 必然填充。
    */
   readonly dshHome: string
 }
@@ -48,80 +57,91 @@ export const DEFAULT_CONFIG: SecurityConfig = {
   session: { ttlMinutes: 480 },
   rateLimit: { maxAttempts: 5, windowMinutes: 15 },
   defaultSettings: undefined,
+  // 仅类型占位：normalizeConfig 的每个返回分支都会填入真实解析值。
   dshHome: '',
 }
 
-function isBoundedNumber(value: unknown, min: number, max: number): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+/** 枚举校验：不在白名单即抛错；undefined 回退默认值。 */
+function requireEnum<T extends string>(
+  value: unknown, allowed: readonly T[], fallback: T, label: string,
+): T {
+  if (value === undefined) return fallback
+  if (typeof value === 'string' && (allowed as readonly string[]).includes(value)) {
+    return value as T
+  }
+  throw new Error(`web-security: ${label} 只允许 ${allowed.join(' / ')}`)
+}
+
+/** 有界数值校验：越界或非数字即抛错；undefined 回退默认值。 */
+function requireBoundedNumber(
+  value: unknown, min: number, max: number, fallback: number, label: string,
+): number {
+  if (value === undefined) return fallback
+  if (typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max) {
+    return value
+  }
+  throw new Error(`web-security: ${label} 必须位于 ${min}–${max}`)
+}
+
+/** 布尔校验：非布尔即抛错；undefined 回退默认值。 */
+function requireBoolean(value: unknown, fallback: boolean, label: string): boolean {
+  if (value === undefined) return fallback
+  if (typeof value === 'boolean') return value
+  throw new Error(`web-security: ${label} 必须是布尔值`)
+}
+
+/** 可空非空字符串校验（TLS 路径形态）；null/undefined 归一为 null。 */
+function requireOptionalPath(value: unknown, label: string): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'string' && value.length > 0) return value
+  throw new Error(`web-security: ${label} 必须是非空字符串或 null`)
 }
 
 /**
  * 校验并规范化一份插件配置输入。
- * @param input - patch config 的原始值（unknown）。
+ * @param input - patch config 的原始值（unknown）；undefined/null 视为未配置。
  * @returns 规范化后的完整配置（字段缺省时取 DEFAULT_CONFIG 对应值）。
  * @throws 非法字段（错误配置大声失败）。
  */
 export function normalizeConfig(input: unknown): SecurityConfig {
-  if (input === undefined || input === null) return { ...DEFAULT_CONFIG, defaultSettings: undefined }
-  if (typeof input !== 'object' || Array.isArray(input)) {
+  // undefined/null 与 {} 同路：所有字段走统一的缺省与校验逻辑，
+  // 保证 dshHome 等运行时解析字段在「未配置」时同样被填充。
+  if (input !== null && input !== undefined && (typeof input !== 'object' || Array.isArray(input))) {
     throw new Error('web-security: 配置必须是对象')
   }
-  const value = input as Record<string, unknown>
+  const value = (input ?? {}) as Record<string, unknown>
   const entry = (value.entry ?? {}) as Record<string, unknown>
   const session = (value.session ?? {}) as Record<string, unknown>
   const rateLimit = (value.rateLimit ?? {}) as Record<string, unknown>
   const tls = (entry.tls ?? {}) as Record<string, unknown>
 
-  const host = entry.host === '127.0.0.1' || entry.host === '0.0.0.0'
-    ? entry.host
-    : entry.host === undefined
-      ? DEFAULT_CONFIG.entry.host
-      : (() => { throw new Error('web-security: entry.host 只允许 127.0.0.1 或 0.0.0.0') })()
-  const port = entry.port === undefined
-    ? DEFAULT_CONFIG.entry.port
-    : isBoundedNumber(entry.port, 1, 65535)
-      ? entry.port
-      : (() => { throw new Error('web-security: entry.port 必须位于 1–65535') })()
-  const certPath = tls.certPath === null || tls.certPath === undefined
-    ? null
-    : typeof tls.certPath === 'string' && tls.certPath.length > 0
-      ? tls.certPath
-      : (() => { throw new Error('web-security: entry.tls.certPath 必须是非空字符串或 null') })()
-  const keyPath = tls.keyPath === null || tls.keyPath === undefined
-    ? null
-    : typeof tls.keyPath === 'string' && tls.keyPath.length > 0
-      ? tls.keyPath
-      : (() => { throw new Error('web-security: entry.tls.keyPath 必须是非空字符串或 null') })()
+  const host = requireEnum(entry.host, ['127.0.0.1', '0.0.0.0'] as const,
+    DEFAULT_CONFIG.entry.host, 'entry.host')
+  const port = requireBoundedNumber(entry.port, 1, 65535,
+    DEFAULT_CONFIG.entry.port, 'entry.port')
+  const certPath = requireOptionalPath(tls.certPath, 'entry.tls.certPath')
+  const keyPath = requireOptionalPath(tls.keyPath, 'entry.tls.keyPath')
   if ((certPath === null) !== (keyPath === null)) {
     throw new Error('web-security: entry.tls.certPath 与 keyPath 必须同时提供或同时为 null')
   }
 
-  const ttlMinutes = session.ttlMinutes === undefined
-    ? DEFAULT_CONFIG.session.ttlMinutes
-    : isBoundedNumber(session.ttlMinutes, 5, 60 * 24 * 30)
-      ? session.ttlMinutes
-      : (() => { throw new Error('web-security: session.ttlMinutes 必须位于 5–43200') })()
-  const maxAttempts = rateLimit.maxAttempts === undefined
-    ? DEFAULT_CONFIG.rateLimit.maxAttempts
-    : isBoundedNumber(rateLimit.maxAttempts, 1, 100)
-      ? rateLimit.maxAttempts
-      : (() => { throw new Error('web-security: rateLimit.maxAttempts 必须位于 1–100') })()
-  const windowMinutes = rateLimit.windowMinutes === undefined
-    ? DEFAULT_CONFIG.rateLimit.windowMinutes
-    : isBoundedNumber(rateLimit.windowMinutes, 1, 24 * 60)
-      ? rateLimit.windowMinutes
-      : (() => { throw new Error('web-security: rateLimit.windowMinutes 必须位于 1–1440') })()
+  const ttlRange = SETTINGS_RANGES.sessionTtlMinutes
+  const ttlMinutes = requireBoundedNumber(session.ttlMinutes, ttlRange.min, ttlRange.max,
+    DEFAULT_CONFIG.session.ttlMinutes, 'session.ttlMinutes')
+  const attemptsRange = SETTINGS_RANGES.maxLoginAttempts
+  const maxAttempts = requireBoundedNumber(rateLimit.maxAttempts, attemptsRange.min, attemptsRange.max,
+    DEFAULT_CONFIG.rateLimit.maxAttempts, 'rateLimit.maxAttempts')
+  const windowRange = SETTINGS_RANGES.rateLimitWindowMinutes
+  const windowMinutes = requireBoundedNumber(rateLimit.windowMinutes, windowRange.min, windowRange.max,
+    DEFAULT_CONFIG.rateLimit.windowMinutes, 'rateLimit.windowMinutes')
 
-  const enabled = value.enabled === undefined
-    ? DEFAULT_CONFIG.enabled
-    : typeof value.enabled === 'boolean'
-      ? value.enabled
-      : (() => { throw new Error('web-security: enabled 必须是布尔值') })()
+  const enabled = requireBoolean(value.enabled, DEFAULT_CONFIG.enabled, 'enabled')
 
-  // dshHome 解析：config 显式值 → $DSH_HOME → ~/.dsh（平台约定）。
+  // dshHome 解析唯一入口：config 显式值 → $DSH_HOME → ~/.dsh（平台约定）。
+  // 空串 env 视为未设置（|| 兜底），与「缺省即默认」语义一致。
   const dshHome = typeof value.dshHome === 'string' && value.dshHome.length > 0
     ? value.dshHome
-    : process.env.DSH_HOME ?? join(homedir(), '.dsh')
+    : process.env.DSH_HOME || join(homedir(), '.dsh')
 
   return {
     enabled,
