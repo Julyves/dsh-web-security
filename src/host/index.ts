@@ -16,14 +16,21 @@
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { Context } from '@deepseek-ai/cordis'
 import { normalizeConfig, type SecurityConfig } from './core'
+import { createAccountStore } from './account-store'
+import { createSessionStore } from './session-store'
+import { createRateLimiter } from './rate-limiter'
+import { createAuditLog } from './audit-log'
+import { createSettingsStore } from './settings-store'
+import { resolvePluginDataRoot, nodeFs } from './plugin-data'
 import { createHostSecurityEndpoints, type SecurityDeps, type SecurityEndpoints } from '../contracts/host-endpoints'
-import { validateSettings, type SecuritySettings } from '../contracts/settings'
+import { type SecuritySettings } from '../contracts/settings'
 import type {
   AccountCreateRequest, AccountRemoveRequest, AccountSummary, AccountUpdatePasswordRequest,
   AuditReadRequest, AuditReadResult, LoginRequest, LoginResult, RemoteEnvelope,
   SecurityStatus, SettingsReadRequest, SettingsWriteRequest,
   StatusRequest, LogoutRequest, AccountsListRequest,
 } from '../contracts/host-endpoints'
+import type { AuthEvent } from '../contracts/auth-events'
 
 /**
  * 安全 Remote 服务：Cordis 壳。
@@ -45,22 +52,46 @@ export class SecurityService extends TypertRemoteService {
     this.endpoints = createHostSecurityEndpoints(this.buildDeps())
   }
 
-  /** 将配置规范化产物适配为结构化 SecurityDeps（M1 装配真实模块）。 */
+  /** 装配五模块为结构化 SecurityDeps。 */
   private buildDeps(): SecurityDeps {
+    const cfg = this.normalizedConfig
+    const dataRoot = resolvePluginDataRoot(cfg.dshHome)
+    const accounts = createAccountStore(nodeFs, dataRoot)
+    const sessions = createSessionStore(cfg.session.ttlMinutes)
+    const rl = createRateLimiter(cfg.rateLimit.maxAttempts, cfg.rateLimit.windowMinutes * 60_000)
+    const audit = createAuditLog(nodeFs, dataRoot, true)
+    const settings = createSettingsStore(nodeFs, dataRoot, cfg.defaultSettings)
+
     return {
-      verifyPassword: async () => false,
-      loginGate: async () => ({ state: 'allowed' }),
-      recordFailure: async () => {},
-      recordSuccess: async () => {},
-      recordEvent: () => {},
-      readSettings: () => {
-        // 出厂预设优先：patch config.defaultSettings 非法时大声失败
-        // （与 normalizeConfig 策略一致，绝不静默修正安全策略）。
-        const preset = validateSettings(this.normalizedConfig.defaultSettings)
-        if (!preset.ok) {
-          throw new Error(`web-security: defaultSettings 非法（${preset.field}: ${preset.message}）`)
-        }
-        return preset.settings
+      // 账号面
+      listAccounts: () => accounts.list(),
+      verifyPassword: (u, p) => accounts.verifyPassword(u, p),
+      createAccount: (u, p) => accounts.create(u, p),
+      updatePassword: (u, c, n) => accounts.updatePassword(u, c, n),
+      removeAccount: (u) => accounts.remove(u),
+      hasAccounts: () => accounts.hasAny(),
+      // 限速面
+      loginGate: async (u) => rl.gate(u),
+      recordFailure: async (u) => rl.recordFailure(u),
+      recordSuccess: async (u) => rl.recordSuccess(u),
+      // 会话面
+      createSession: (u, ip) => sessions.create(u, ip),
+      resolveSession: (token) => {
+        const e = sessions.resolve(token)
+        return e === undefined ? undefined : { username: e.username }
+      },
+      revokeSession: (token) => sessions.revoke(token),
+      // 审计面
+      recordEvent: (e: AuthEvent) => audit.append(e),
+      readAudit: (offset, limit) => audit.read(offset, limit),
+      // 设置面
+      readSettings: () => settings.read(),
+      writeSettings: (partial) => settings.write(partial),
+      // 配置面
+      config: {
+        enabled: cfg.enabled,
+        entry: { host: cfg.entry.host, port: cfg.entry.port, tls: cfg.entry.tls.certPath !== null ? 'custom' : 'self-signed' },
+        rpID: cfg.rpID,
       },
     }
   }

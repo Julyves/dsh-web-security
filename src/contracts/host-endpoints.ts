@@ -94,20 +94,31 @@ export interface AuditReadResult {
   readonly hasMore: boolean
 }
 
-/** 安全端点依赖注入面（M1 实现时由宿主壳装配）。 */
+/** 安全端点依赖注入面（由宿主壳装配五模块后提供）。 */
 export interface SecurityDeps {
-  /** 账号校验（用户名+密码是否正确；不存在用户名执行假校验——审计 S3）。 */
+  // 账号面
+  listAccounts(): Promise<readonly AccountSummary[]>
   verifyPassword(username: string, password: string): Promise<boolean>
-  /** 登录限速判定（username 维度——IP 维度归 M2 代理层，审计 S2）。 */
+  createAccount(username: string, password: string): Promise<void>
+  updatePassword(username: string, current: string, next: string): Promise<void>
+  removeAccount(username: string): Promise<void>
+  hasAccounts(): Promise<boolean>
+  // 限速面（username 维度——审计 S2）
   loginGate(username: string): Promise<LoginGate>
-  /** 登记一次失败（username 维度）。 */
   recordFailure(username: string): Promise<void>
-  /** 登记成功（重置该 username 计数）。 */
   recordSuccess(username: string): Promise<void>
-  /** 登记认证事件（审计；安全降级操作如 settingsWrite 也应触发——审计 M2）。 */
+  // 会话面
+  createSession(username: string, ip: string): { token: string; cookie: string }
+  resolveSession(token: string): { username: string } | undefined
+  revokeSession(token: string): void
+  // 审计面
   recordEvent(event: AuthEvent): void
-  /** 读取当前设置。 */
+  readAudit(offset: number, limit: number): Promise<{ events: readonly AuthEvent[]; hasMore: boolean }>
+  // 设置面
   readSettings(): SecuritySettings
+  writeSettings(partial: Partial<SecuritySettings>): Promise<{ ok: true; value: SecuritySettings } | { ok: false; error: { code: string; message: string } }>
+  // 配置面
+  readonly config: { enabled: boolean; entry: { host: string; port: number; tls: string }; rpID: string }
 }
 
 /** 安全端点完整接口（宿主 @Remote 逐一委托的方法面）。 */
@@ -135,49 +146,99 @@ export interface SecurityEndpoints {
 }
 
 /**
- * 安全端点工厂：为宿主壳装配纯业务实现。
+ * 安全端点工厂：组合 SecurityDeps 各面实现业务端点。
  *
- * 骨架阶段返回占位实现（登录类端点返回占位错误码）；
- * M1 起按模块（account-store/session-store/rate-limiter/audit-log）填充。
+ * 横切关注点（审计 M2）：login 成功/失败触发限速登记 + 审计事件；
+ * settingsWrite 触发 settings-changed 审计事件。
  */
 export function createHostSecurityEndpoints(
   deps: SecurityDeps,
 ): SecurityEndpoints {
   return {
-    async status() {
-      // 占位：entry 三元组为骨架示意，M1 起从规范化配置取真实值。
+    async status(_request: StatusRequest): Promise<SecurityStatus> {
       return {
-        enabled: true,
+        enabled: deps.config.enabled,
         hasAccounts: null,
-        methods: { password: true, passkey: false },
-        entry: { host: '0.0.0.0', port: 3443, tls: 'self-signed' },
+        methods: { password: true, passkey: deps.config.rpID.length > 0 },
+        entry: {
+          host: deps.config.entry.host,
+          port: deps.config.entry.port,
+          tls: deps.config.entry.tls as 'self-signed' | 'custom' | 'none',
+        },
         diagnostics: [],
       }
     },
-    async login() {
-      return { ok: false, code: 'bad-credentials' }
+
+    async login(request: LoginRequest, _signal?: AbortSignal): Promise<LoginResult> {
+      // 限速门：username 维度（审计 S2——IP 维度归 M2 代理层）
+      const gate = await deps.loginGate(request.username)
+      if (gate.state === 'locked') {
+        deps.recordEvent({ kind: 'login-locked', at: Date.now(), actor: request.username, detail: `retryAfterMs=${gate.retryAfterMs}` })
+        return { ok: false, code: 'locked', retryAfterMs: gate.retryAfterMs }
+      }
+      const valid = await deps.verifyPassword(request.username, request.password)
+      if (!valid) {
+        await deps.recordFailure(request.username)
+        deps.recordEvent({ kind: 'login-failure', at: Date.now(), actor: request.username })
+        return { ok: false, code: 'bad-credentials' }
+      }
+      await deps.recordSuccess(request.username)
+      deps.recordEvent({ kind: 'login-success', at: Date.now(), actor: request.username })
+      return { ok: true }
     },
-    async logout() {},
-    async accountsList() {
-      return []
+
+    async logout(_request: LogoutRequest): Promise<void> {
+      // 会话撤销需要 token——端点层无 token 参数（从 M2 代理层的 cookie 取）
+      // M1 占位：M2 代理层在 logout 时解析 cookie → 调 revokeSession
     },
-    async accountCreate() {
-      return { ok: false, error: { code: 'not-implemented', message: 'M1 未装配' } }
+
+    async accountsList(_request: AccountsListRequest): Promise<readonly AccountSummary[]> {
+      return deps.listAccounts()
     },
-    async accountUpdatePassword() {
-      return { ok: false, error: { code: 'not-implemented', message: 'M1 未装配' } }
+
+    async accountCreate(request: AccountCreateRequest): Promise<RemoteEnvelope<void>> {
+      try {
+        await deps.createAccount(request.username, request.password)
+        deps.recordEvent({ kind: 'account-created', at: Date.now(), actor: request.username })
+        return { ok: true, value: undefined }
+      } catch (error) {
+        return { ok: false, error: { code: 'create-failed', message: error instanceof Error ? error.message : String(error) } }
+      }
     },
-    async accountRemove() {
-      return { ok: false, error: { code: 'not-implemented', message: 'M1 未装配' } }
+
+    async accountUpdatePassword(request: AccountUpdatePasswordRequest): Promise<RemoteEnvelope<void>> {
+      try {
+        await deps.updatePassword(request.username, request.currentPassword, request.newPassword)
+        deps.recordEvent({ kind: 'password-changed', at: Date.now(), actor: request.username })
+        return { ok: true, value: undefined }
+      } catch (error) {
+        return { ok: false, error: { code: 'update-failed', message: error instanceof Error ? error.message : String(error) } }
+      }
     },
-    async settingsRead() {
+
+    async accountRemove(request: AccountRemoveRequest): Promise<RemoteEnvelope<void>> {
+      try {
+        await deps.removeAccount(request.username)
+        deps.recordEvent({ kind: 'account-removed', at: Date.now(), actor: request.username })
+        return { ok: true, value: undefined }
+      } catch (error) {
+        return { ok: false, error: { code: 'remove-failed', message: error instanceof Error ? error.message : String(error) } }
+      }
+    },
+
+    async settingsRead(_request: SettingsReadRequest): Promise<SecuritySettings> {
       return deps.readSettings()
     },
-    async settingsWrite() {
-      return { ok: false, error: { code: 'not-implemented', message: 'M1 未装配' } }
+
+    async settingsWrite(request: SettingsWriteRequest): Promise<RemoteEnvelope<SecuritySettings>> {
+      const result = await deps.writeSettings(request)
+      if (!result.ok) return result
+      deps.recordEvent({ kind: 'settings-changed', at: Date.now(), actor: 'system', detail: JSON.stringify(Object.keys(request)) })
+      return { ok: true, value: result.value }
     },
-    async auditRead() {
-      return { events: [], hasMore: false }
+
+    async auditRead(request: AuditReadRequest, _signal?: AbortSignal): Promise<AuditReadResult> {
+      return deps.readAudit(request.offset, request.limit)
     },
   }
 }
