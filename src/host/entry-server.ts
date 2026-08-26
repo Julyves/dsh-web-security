@@ -196,9 +196,19 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
     return req.socket.remoteAddress ?? 'unknown'
   }
 
+  /** pathname 规范化（去 query string——审计 V23/X1：所有 path 判断统一走此函数）。 */
+  function pathnameOf(req: IncomingMessage): string {
+    try {
+      return new URL(req.url ?? '/', 'http://x').pathname
+    } catch {
+      return '/'
+    }
+  }
+
   /** 认证门：未认证 → 302 登录页。 */
   function requireAuth(req: IncomingMessage, res: ServerResponse): boolean {
-    const result = authGate.check(req.headers.cookie, req.url ?? '/')
+    // X1：使用规范化 pathname，与 handleRequest 一致。
+    const result = authGate.check(req.headers.cookie, pathnameOf(req))
     if (!result.authenticated) {
       res.writeHead(302, { location: '/security/login' })
       res.end()
@@ -311,6 +321,18 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
       res.end(JSON.stringify({ ok: false, error: 'missing username or password' }))
       return
     }
+    // 长度限制（审计 X5）：超长 username 会进 rate-limiter Map key + 审计日志
+    // （10000 条 × 100KB = 1GB 内存风险）；超长密码无意义。
+    if (parsed.username.length > 64 || parsed.username.length === 0) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, code: 'bad-credentials' }))
+      return
+    }
+    if (parsed.password.length > 1024) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, code: 'bad-credentials' }))
+      return
+    }
     // 调用 SecurityDeps 的 login 面（组合 verifyPassword + rateLimiter + createSession）。
     const gate2 = await deps.loginGate(parsed.username)
     if (gate2.state === 'locked') {
@@ -345,9 +367,10 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
       deps.revokeSession(token)
       deps.recordEvent({ kind: 'logout', at: Date.now(), actor: 'unknown' })
     }
-    // 清除 cookie。
+    // 清除 cookie（Secure 标志与签发时一致——审计 X6）。
+    const securePart = config.tlsMode === 'https' ? ' Secure;' : ''
     res.writeHead(302, {
-      'set-cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`,
+      'set-cookie': `${SESSION_COOKIE_NAME}=; HttpOnly;${securePart} SameSite=Strict; Path=/; Max-Age=0`,
       'location': '/security/login',
     })
     res.end()
@@ -460,7 +483,8 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
 
   /** upgrade 事件：认证门 → 代理转发。 */
   function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-    const path = req.url ?? '/'
+    // X1：使用规范化 pathname（与 handleRequest 一致——防 /security/..%2f 绕过）。
+    const path = pathnameOf(req)
     // /security/* 不需要 upgrade（没有 WebSocket）。
     if (path.startsWith('/security/')) {
       socket.destroy()

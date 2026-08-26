@@ -78,10 +78,11 @@ export function createProxy(upstream: ProxyUpstream): {
         method: req.method ?? 'GET',
         headers,
       }, (proxyRes) => {
-        // 转发响应头 + 状态码。
-        const respHeaders: Record<string, string> = {}
+        // 转发响应头 + 状态码。set-cookie 是数组（多个 cookie）——不能只取 string（审计 X3）。
+        const respHeaders: Record<string, string | string[]> = {}
         for (const [key, val] of Object.entries(proxyRes.headers)) {
-          if (typeof val === 'string') respHeaders[key] = val
+          if (Array.isArray(val)) respHeaders[key] = val
+          else if (typeof val === 'string') respHeaders[key] = val
         }
         res.writeHead(proxyRes.statusCode ?? 200, respHeaders)
         // 流式管道响应 body。
