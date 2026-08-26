@@ -106,10 +106,8 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
   let server: Server | HttpsServer | undefined
 
   function getClientIp(req: IncomingMessage): string {
-    // X-Forwarded-For 信任链：入口是边缘节点，直接取 socket 远端。
-    // 如果自己在代理后（不推荐——入口应直接面向公网），XFF 可被伪造。
-    const xff = req.headers['x-forwarded-for']
-    if (typeof xff === 'string') return xff.split(',')[0]!.trim()
+    // 入口是边缘节点（直接面向公网）——不信任任何 forwarded 头（审计 V21）。
+    // 攻击者可伪造 X-Forwarded-For 绕过 IP 维度限速。
     return req.socket.remoteAddress ?? 'unknown'
   }
 
@@ -125,7 +123,8 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
   }
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const path = req.url ?? '/'
+    // 用 pathname 规范化（去 query string，防 /login?foo=bar 绕过精确匹配——审计 V23）。
+    const path = new URL(req.url ?? '/', 'http://x').pathname
 
     // ── /security/* 公开路由 ──
     if (path === '/security/login' && req.method === 'GET') {
@@ -178,9 +177,17 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
       res.end(JSON.stringify({ ok: false, code: 'locked', retryAfterMs: gate.retryAfterMs }))
       return
     }
-    // 解析 JSON body。
+    // 解析 JSON body（限制 64KB 防内存耗尽 DoS——审计 V22）。
+    const MAX_LOGIN_BODY = 65_536
     let body = ''
-    for await (const chunk of req) body += chunk.toString()
+    for await (const chunk of req) {
+      body += chunk.toString()
+      if (Buffer.byteLength(body, 'utf8') > MAX_LOGIN_BODY) {
+        res.writeHead(413, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'body too large' }))
+        return
+      }
+    }
     let parsed: { username?: string; password?: string }
     try {
       parsed = JSON.parse(body)
