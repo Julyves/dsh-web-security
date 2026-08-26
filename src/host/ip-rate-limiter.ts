@@ -25,6 +25,9 @@ const MAX_LOCKOUT_MS = 3_600_000
  * @param maxAttempts - 窗口内允许的失败次数。
  * @param windowMs - 失败窗口（ms）。
  */
+/** Map 条目上限（防内存泄漏 DoS——审计 V29）。 */
+const MAX_ENTRIES = 10_000
+
 export function createIpRateLimiter(maxAttempts: number, windowMs: number): {
   gate: (ip: string) => LoginGate
   recordFailure: (ip: string) => void
@@ -36,6 +39,11 @@ export function createIpRateLimiter(maxAttempts: number, windowMs: number): {
   function get(ip: string): FailureEntry {
     let entry = entries.get(ip)
     if (entry === undefined) {
+      // LRU 淘汰：Map 超上限时删除最旧 key（Map 保持插入序）。
+      if (entries.size >= MAX_ENTRIES) {
+        const oldest = entries.keys().next().value
+        if (oldest !== undefined) entries.delete(oldest)
+      }
       entry = { failures: 0, firstFailAt: 0, lockedUntil: 0, lockoutCount: 0 }
       entries.set(ip, entry)
     }

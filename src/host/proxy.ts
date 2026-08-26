@@ -143,15 +143,13 @@ export function createProxy(upstream: ProxyUpstream): {
         upstream.write(requestLine + headerLines + '\r\n\r\n')
         if (head.length > 0) upstream.write(head)
 
-        // 双向管道：客户端 socket ↔ 上游 socket。
-        // pipeline 自动处理背压 + 错误传播 + 清理。
-        pipeline(socket, upstream, () => {
-          // 上游→客户端管道结束（任一方关闭）。
-          resolve()
-        })
-        pipeline(upstream, socket, () => {
-          // 反向管道结束。
-        })
+        // 双向管道：任一方向结束 → 销毁两端（防半开连接残留——审计 V27）。
+        const cleanup = (): void => {
+          if (!socket.destroyed) socket.destroy()
+          if (!upstream.destroyed) upstream.destroy()
+        }
+        pipeline(socket, upstream, () => { resolve(); cleanup() })
+        pipeline(upstream, socket, () => { cleanup() })
       })
     })
   }
