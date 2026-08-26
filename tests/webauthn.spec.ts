@@ -140,4 +140,33 @@ describe('createWebAuthnService', () => {
     expect(r2.ok).toBe(false)
     // 区分点：r2 在 challenge 检查处就失败（同样返回 bad-credentials——不泄露原因）。
   })
+
+  it('challenge-用户一致性：为 admin 签发的 challenge 不能被 userB 的凭证消费（审计 W1）', async () => {
+    const { service, accounts } = createTestService()
+    accounts.set('userB', { passkeys: [{ credentialId: 'userB-cred', publicKey: 'pubB', counter: 0, transports: [] }] })
+    // 为 admin 签发 challenge。
+    const options = await service.loginBegin('admin')
+    const clientData = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: options.challenge, origin: 'http://localhost:13443' })).toString('base64url')
+    // userB 的凭证消费 admin 的 challenge → 拒绝。
+    const result = await service.loginComplete({
+      id: 'userB-cred', rawId: 'userB-cred', type: 'public-key', clientExtensionResults: {},
+      response: { clientDataJSON: clientData, authenticatorData: '', signature: '' },
+    }, '127.0.0.1')
+    expect(result.ok).toBe(false)
+  })
+
+  it('discoverable 登录：challenge 无 username 绑定时不做用户一致性拦截', async () => {
+    const { service, accounts } = createTestService()
+    accounts.set('userC', { passkeys: [{ credentialId: 'userC-cred', publicKey: 'pubC', counter: 0, transports: [] }] })
+    // 不带 username 签发。
+    const options = await service.loginBegin()
+    expect(options.allowCredentials).toHaveLength(0)
+    const clientData = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: options.challenge, origin: 'http://localhost:13443' })).toString('base64url')
+    // username=undefined → 一致性校验跳过；到达 verify 阶段因假签名抛错 → bad-credentials。
+    const result = await service.loginComplete({
+      id: 'userC-cred', rawId: 'userC-cred', type: 'public-key', clientExtensionResults: {},
+      response: { clientDataJSON: clientData, authenticatorData: '', signature: '' },
+    }, '127.0.0.1')
+    expect(result.ok).toBe(false)
+  })
 })
