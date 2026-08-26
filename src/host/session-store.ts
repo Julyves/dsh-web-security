@@ -25,8 +25,10 @@ export interface SessionEntry {
 /**
  * 创建会话存储。
  * @param ttlMinutes - 会话 TTL（分钟）；超过后惰性清理。
+ * @param secureCookie - cookie 是否带 Secure 标志（https=true；http 开发模式
+ *   必须为 false——Secure cookie 在明文页面被浏览器拒绝存储，审计 X6）。
  */
-export function createSessionStore(ttlMinutes: number): {
+export function createSessionStore(ttlMinutes: number, secureCookie = true): {
   create: (username: string, ip: string) => { token: string; cookie: string }
   resolve: (token: string) => SessionEntry | undefined
   revoke: (token: string) => void
@@ -53,7 +55,8 @@ export function createSessionStore(ttlMinutes: number): {
     }
     sessions.set(token, entry)
     userTokens.set(username, token)
-    const cookie = `${SESSION_COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlMinutes * 60}`
+    const securePart = secureCookie ? ' Secure;' : ''
+    const cookie = `${SESSION_COOKIE_NAME}=${token}; HttpOnly;${securePart} SameSite=Strict; Path=/; Max-Age=${ttlMinutes * 60}`
     return { token, cookie }
   }
 

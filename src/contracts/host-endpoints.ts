@@ -265,6 +265,14 @@ export function createHostSecurityEndpoints(
     },
 
     async settingsWrite(request: SettingsWriteRequest): Promise<RemoteEnvelope<SecuritySettings>> {
+      // 自锁死防护（审计 X2）：passwordLogin 与 passkeyLogin 不可同时关闭——
+      // 否则无任何登录方式可用，唯一恢复手段是手改 settings.json。
+      const current = deps.readSettings()
+      const nextPassword = request.passwordLogin ?? current.passwordLogin
+      const nextPasskey = request.passkeyLogin ?? current.passkeyLogin
+      if (!nextPassword && !nextPasskey) {
+        return { ok: false, error: { code: 'lockout-prevented', message: '不能同时关闭密码登录与通行密钥登录（防自锁死）' } }
+      }
       const result = await deps.writeSettings(request)
       if (!result.ok) return result
       deps.recordEvent({ kind: 'settings-changed', at: Date.now(), actor: 'system', detail: JSON.stringify(Object.keys(request)) })

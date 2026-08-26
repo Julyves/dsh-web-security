@@ -80,7 +80,8 @@ export class SecurityService extends TypertRemoteService {
     const cfg = this.normalizedConfig
     const dataRoot = resolvePluginDataRoot(cfg.dshHome)
     const accounts = createAccountStore(nodeFs, dataRoot)
-    const sessions = createSessionStore(cfg.session.ttlMinutes)
+    // http 开发模式下 cookie 不带 Secure（否则浏览器拒绝存储——审计 X6）。
+    const sessions = createSessionStore(cfg.session.ttlMinutes, cfg.entry.tlsMode === 'https')
     const rl = createRateLimiter(cfg.rateLimit.maxAttempts, cfg.rateLimit.windowMinutes * 60_000)
     const settings = createSettingsStore(nodeFs, dataRoot, cfg.defaultSettings)
     const audit = createAuditLog(nodeFs, dataRoot, settings.read().auditEnabled)
