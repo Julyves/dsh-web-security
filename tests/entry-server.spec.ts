@@ -43,6 +43,10 @@ async function createRealDeps(dataRoot: string): Promise<SecurityDeps> {
     readSettings: () => settings.read(),
     writeSettings: (p) => settings.write(p),
     config: { enabled: true, entry: { host: '0.0.0.0', port: 3443, tls: 'http' }, rpID: '' },
+    passkeyRegisterBegin: async () => { throw new Error('passkey not available') },
+    passkeyRegisterComplete: async () => ({ ok: false, error: { code: 'not-available', message: 'passkey not available' } }),
+    passkeyLoginBegin: async () => { throw new Error('passkey not available') },
+    passkeyLoginComplete: async () => ({ ok: false, code: 'bad-credentials' }),
   }
 }
 

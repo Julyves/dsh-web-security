@@ -120,6 +120,10 @@ try {
     readSettings: () => ({ passwordLogin: true, passkeyLogin: false, sessionTtlMinutes: 480, maxLoginAttempts: 5, rateLimitWindowMinutes: 15, auditEnabled: true }),
     writeSettings: async () => ({ ok: false, error: { code: 'stub', message: 'stub' } }),
     config: { enabled: true, entry: { host: '127.0.0.1', port: 13443, tls: 'http' }, rpID: '' },
+    passkeyRegisterBegin: async () => { throw new Error('passkey not available') },
+    passkeyRegisterComplete: async () => ({ ok: false, error: { code: 'not-available', message: 'passkey not available' } }),
+    passkeyLoginBegin: async () => { throw new Error('passkey not available') },
+    passkeyLoginComplete: async () => ({ ok: false, code: 'bad-credentials' }),
   }
   const entry = createEntryServer(entryDeps, {
     host: '127.0.0.1', port: 13555, tlsMode: 'http', certPath: null, keyPath: null,

@@ -102,6 +102,12 @@ export function createAccountStore(fs: PluginDataFs, root: string): {
   updatePassword: (username: string, current: string, next: string) => Promise<void>
   remove: (username: string) => Promise<void>
   hasAny: () => Promise<boolean>
+  // passkey CRUD（M3）
+  addPasskey: (username: string, credential: PasskeyCredential) => Promise<void>
+  listPasskeys: (username: string) => Promise<readonly PasskeyCredential[]>
+  findPasskey: (credentialId: string) => Promise<{ username: string; credential: PasskeyCredential } | undefined>
+  updatePasskeyCounter: (credentialId: string, counter: number) => Promise<void>
+  removePasskey: (username: string, credentialId: string) => Promise<void>
 } {
   const accountsPath = join(root, ACCOUNTS_FILE)
 
@@ -204,5 +210,55 @@ export function createAccountStore(fs: PluginDataFs, root: string): {
     return file.accounts.length > 0
   }
 
-  return { list, find, verifyPassword, create, updatePassword, remove, hasAny }
+  // ── passkey CRUD（M3）──
+
+  async function addPasskey(username: string, credential: PasskeyCredential): Promise<void> {
+    const file = await read()
+    const accounts = file.accounts.map(a => {
+      if (a.username !== username) return a
+      // 同一 credentialId 不重复注册。
+      const exists = a.passkeys.some(p => p.credentialId === credential.credentialId)
+      if (exists) throw new Error(`web-security: passkey ${credential.credentialId.slice(0, 8)} 已注册`)
+      return { ...a, passkeys: [...a.passkeys, credential], updatedAt: Date.now() }
+    })
+    if (accounts.length === file.accounts.length && !file.accounts.some(a => a.username === username)) {
+      throw new Error(`web-security: 用户名 ${JSON.stringify(username)} 不存在`)
+    }
+    await write({ v: 1, accounts })
+  }
+
+  async function listPasskeys(username: string): Promise<readonly PasskeyCredential[]> {
+    const record = await find(username)
+    return record?.passkeys ?? []
+  }
+
+  async function findPasskey(credentialId: string): Promise<{ username: string; credential: PasskeyCredential } | undefined> {
+    const file = await read()
+    for (const account of file.accounts) {
+      const cred = account.passkeys.find(p => p.credentialId === credentialId)
+      if (cred !== undefined) return { username: account.username, credential: cred }
+    }
+    return undefined
+  }
+
+  async function updatePasskeyCounter(credentialId: string, counter: number): Promise<void> {
+    const file = await read()
+    const accounts = file.accounts.map(a => ({
+      ...a,
+      passkeys: a.passkeys.map(p => p.credentialId === credentialId ? { ...p, counter } : p),
+    }))
+    await write({ v: 1, accounts })
+  }
+
+  async function removePasskey(username: string, credentialId: string): Promise<void> {
+    const file = await read()
+    const accounts = file.accounts.map(a => {
+      if (a.username !== username) return a
+      return { ...a, passkeys: a.passkeys.filter(p => p.credentialId !== credentialId), updatedAt: Date.now() }
+    })
+    await write({ v: 1, accounts })
+  }
+
+  return { list, find, verifyPassword, create, updatePassword, remove, hasAny,
+    addPasskey, listPasskeys, findPasskey, updatePasskeyCounter, removePasskey }
 }

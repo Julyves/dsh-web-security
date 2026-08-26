@@ -22,6 +22,7 @@ import { createRateLimiter } from './rate-limiter'
 import { createAuditLog } from './audit-log'
 import { createSettingsStore } from './settings-store'
 import { createEntryServer } from './entry-server'
+import { createWebAuthnService } from './webauthn'
 import { resolvePluginDataRoot, nodeFs } from './plugin-data'
 import { createHostSecurityEndpoints, type SecurityDeps, type SecurityEndpoints } from '../contracts/host-endpoints'
 import { type SecuritySettings } from '../contracts/settings'
@@ -30,6 +31,8 @@ import type {
   AuditReadRequest, AuditReadResult, LoginRequest, LoginResult, RemoteEnvelope,
   SecurityStatus, SettingsReadRequest, SettingsWriteRequest,
   StatusRequest, LogoutRequest, AccountsListRequest,
+  PasskeyRegisterBeginRequest, PasskeyRegisterCompleteRequest,
+  PasskeyLoginBeginRequest, PasskeyLoginCompleteRequest,
 } from '../contracts/host-endpoints'
 import type { AuthEvent } from '../contracts/auth-events'
 
@@ -72,7 +75,7 @@ export class SecurityService extends TypertRemoteService {
     }
   }
 
-  /** 装配五模块为结构化 SecurityDeps。 */
+  /** 装配五模块 + webauthn 为结构化 SecurityDeps。 */
   private buildDeps(): SecurityDeps {
     const cfg = this.normalizedConfig
     const dataRoot = resolvePluginDataRoot(cfg.dshHome)
@@ -83,6 +86,30 @@ export class SecurityService extends TypertRemoteService {
     const audit = createAuditLog(nodeFs, dataRoot, settings.read().auditEnabled)
     // 生命周期：dispose 时 flush 审计残余 + 清理 timer（审计 V19）。
     this.ctx.effect(() => () => audit.dispose(), 'web-security: audit dispose')
+
+    // WebAuthn 服务（rpID 为空时不启用——passkey 端点返回 not-available）。
+    const rpID = cfg.rpID
+    const tlsMode = cfg.entry.tlsMode
+    const entryPort = cfg.entry.port
+    const entryHost = cfg.entry.host
+    const expectedOrigin = tlsMode === 'https' ? `https://${entryHost}:${entryPort}` : `http://${entryHost}:${entryPort}`
+    const webauthn = rpID.length > 0
+      ? createWebAuthnService({
+          rpID, rpName: 'dsh Security', expectedOrigin,
+          findAccount: async (u) => { const a = await accounts.find(u); return a === undefined ? undefined : { passkeys: a.passkeys } },
+          findPasskey: (id) => accounts.findPasskey(id),
+          addPasskey: (u, c) => accounts.addPasskey(u, c),
+          updatePasskeyCounter: (id, c) => accounts.updatePasskeyCounter(id, c),
+          createSession: (u, ip) => sessions.create(u, ip),
+          recordEvent: (e: AuthEvent) => audit.append(e),
+          recordFailure: async (u) => rl.recordFailure(u),
+          recordSuccess: async (u) => rl.recordSuccess(u),
+        })
+      : undefined
+
+    const passkeyNotAvailable = async (): Promise<never> => {
+      throw new Error('web-security: passkey 未启用（rpID 未配置）')
+    }
 
     const deps: SecurityDeps = {
       // 账号面
@@ -115,6 +142,19 @@ export class SecurityService extends TypertRemoteService {
         entry: { host: cfg.entry.host, port: cfg.entry.port, tls: cfg.entry.tls.certPath !== null ? 'custom' : 'self-signed' },
         rpID: cfg.rpID,
       },
+      // passkey 面（M3）
+      passkeyRegisterBegin: webauthn !== undefined
+        ? (u) => webauthn.registerBegin(u)
+        : passkeyNotAvailable,
+      passkeyRegisterComplete: webauthn !== undefined
+        ? (u, c) => webauthn.registerComplete(u, c as never)
+        : passkeyNotAvailable,
+      passkeyLoginBegin: webauthn !== undefined
+        ? (u) => webauthn.loginBegin(u)
+        : passkeyNotAvailable,
+      passkeyLoginComplete: webauthn !== undefined
+        ? (a, ip) => webauthn.loginComplete(a as never, ip)
+        : passkeyNotAvailable,
     }
     return deps
   }
@@ -180,6 +220,30 @@ export class SecurityService extends TypertRemoteService {
   async auditRead(request: AuditReadRequest, signal?: AbortSignal): Promise<AuditReadResult> {
     return this.endpoints.auditRead(request, signal)
   }
+
+  /** passkey 注册开始（已认证用户）。 */
+  @Remote('passkeyRegisterBegin')
+  async passkeyRegisterBegin(request: PasskeyRegisterBeginRequest): Promise<RemoteEnvelope<unknown>> {
+    return this.endpoints.passkeyRegisterBegin(request)
+  }
+
+  /** passkey 注册完成。 */
+  @Remote('passkeyRegisterComplete')
+  async passkeyRegisterComplete(request: PasskeyRegisterCompleteRequest): Promise<RemoteEnvelope<void>> {
+    return this.endpoints.passkeyRegisterComplete(request)
+  }
+
+  /** passkey 登录开始（public）。 */
+  @Remote('passkeyLoginBegin')
+  async passkeyLoginBegin(request: PasskeyLoginBeginRequest): Promise<RemoteEnvelope<unknown>> {
+    return this.endpoints.passkeyLoginBegin(request)
+  }
+
+  /** passkey 登录完成（public）。 */
+  @Remote('passkeyLoginComplete')
+  async passkeyLoginComplete(request: PasskeyLoginCompleteRequest): Promise<LoginResult> {
+    return this.endpoints.passkeyLoginComplete(request)
+  }
 }
 
 export default SecurityService
@@ -193,5 +257,7 @@ export type {
   AuditReadRequest, AuditReadResult, AccountSummary, RemoteEnvelope,
   AccountCreateRequest, AccountUpdatePasswordRequest, AccountRemoveRequest,
   SettingsWriteRequest,
+  PasskeyRegisterBeginRequest, PasskeyRegisterCompleteRequest,
+  PasskeyLoginBeginRequest, PasskeyLoginCompleteRequest,
 } from '../contracts/host-endpoints'
 export type { SecuritySettings } from '../contracts/settings'
