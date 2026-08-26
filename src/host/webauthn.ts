@@ -32,6 +32,8 @@ interface ChallengeEntry {
 }
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000
+/** challenge Map 条目上限（防内存泄漏 DoS——审计 W2）。 */
+const MAX_CHALLENGES = 10_000
 
 /** 从 clientDataJSON（base64url）解码提取 challenge。 */
 function extractChallenge(response: { clientDataJSON: string }): string | undefined {
@@ -66,6 +68,11 @@ export function createWebAuthnService(deps: {
   const challenges = new Map<string, ChallengeEntry>()
 
   function storeChallenge(challenge: string, username: string | undefined): void {
+    // LRU 淘汰：超上限删最旧（Map 保持插入序——审计 W2）。
+    if (challenges.size >= MAX_CHALLENGES) {
+      const oldest = challenges.keys().next().value
+      if (oldest !== undefined) challenges.delete(oldest)
+    }
     challenges.set(challenge, { challenge, username, expiresAt: Date.now() + CHALLENGE_TTL_MS })
     cleanupChallenges()
   }
@@ -180,6 +187,12 @@ export function createWebAuthnService(deps: {
     if (found === undefined) {
       return { ok: false, code: 'bad-credentials' }
     }
+    // challenge 与断言用户一致性校验（审计 W1）：为 admin 签发的 challenge
+    // 不能被其他用户的 passkey 断言消费。
+    if (challengeEntry.username !== undefined && challengeEntry.username !== found.username) {
+      deps.recordEvent({ kind: 'login-failure', at: Date.now(), actor: found.username, detail: 'passkey-challenge-user-mismatch' })
+      return { ok: false, code: 'bad-credentials' }
+    }
     try {
       const verification = await verifyAuthenticationResponse({
         response: assertion,
@@ -199,7 +212,13 @@ export function createWebAuthnService(deps: {
         deps.recordEvent({ kind: 'login-failure', at: Date.now(), actor: found.username, detail: 'passkey' })
         return { ok: false, code: 'bad-credentials' }
       }
+      // counter 回退检测（审计 W3）：newCounter > 0 且 <= 存储 counter → 疑似克隆凭证。
+      // counter 为 0 的 authenticator（不支持计数）跳过校验。
       const newCounter = verification.authenticationInfo?.newCounter ?? found.credential.counter
+      if (newCounter > 0 && newCounter <= found.credential.counter) {
+        deps.recordEvent({ kind: 'login-failure', at: Date.now(), actor: found.username, detail: `passkey-counter-regression (${found.credential.counter} → ${newCounter})` })
+        return { ok: false, code: 'bad-credentials' }
+      }
       await deps.updatePasskeyCounter(credentialId, newCounter)
       await deps.recordSuccess(found.username)
       deps.recordEvent({ kind: 'login-success', at: Date.now(), actor: found.username, detail: 'passkey' })
