@@ -4,7 +4,9 @@
 提供**外部安全访问入口**的插件：高安全性登录界面（账号密码 + 通行密钥），
 TLS 安全入口 + 会话认证 + 反向代理到宿主 loopback 端口，配置可在宿主设置界面完成。
 
-> 状态：**开发中（M0 骨架阶段）**。设计蓝图见 `docs/web-security-blueprint.md`。
+> 状态：**开发中（M0–M3 已完成并合入 dev，M4 待启动）**。设计蓝图见
+> `docs/web-security-blueprint.md`，M1 实施规划见 `docs/m1-implementation-plan.md`，
+> 安全审计报告见 `docs/security-audit-m1.md`。
 
 ## 解决的问题
 
@@ -16,7 +18,7 @@ dsh web 默认只监听 `127.0.0.1:3080` 且无认证层。公网部署时若直
 - 反向代理：认证通过后将请求**归一化为本机流量**转发到 `127.0.0.1:3080`
   （Host/Origin 改写为 loopback 形态——宿主对特权 RPC 方法的 loopback 钉死
   因此照常可用，且部署无需配置 `trustedHosts`）；
-- 设置界面集中管理安全策略。
+- 设置界面集中管理安全策略（M4，尚未实现）。
 
 ## 架构
 
@@ -44,6 +46,7 @@ npm install --legacy-peer-deps --cache .npm-cache
 npm run typecheck  # strict 类型检查（含 noUnusedLocals/noUncheckedIndexedAccess）
 npm run build      # host 半（tsc + esbuild，永不 minify）+ client 半（ModuleLoader 闭包）
 npm run test       # vitest（tests/ 目录；vitest.config.ts 已排除 .wiki 宿主快照）
+npm run smoke      # 构建 + 真实装配冒烟（status/账号创建/登录闭环/入口 302/passkey 路由）
 ```
 
 本地安装验证（构建 → 移除旧版 → 安装 → 重启 `dsh --profile web` → 浏览器强刷）：
@@ -57,7 +60,12 @@ npm run test       # vitest（tests/ 目录；vitest.config.ts 已排除 .wiki �
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | M0 | 设计蓝图 + 可构建骨架 | ✅ |
-| M1 | host 核心：账号/会话/限速/审计/端点 | 规划中 |
-| M2 | 安全入口：TLS + 认证门 + HTTP/WS 反向代理 | 规划中 |
-| M3 | 通行密钥 + 登录页 bundle | 规划中 |
-| M4 | 设置界面 + 部署文档 + 实机验证 | 规划中 |
+| M1 | host 核心：账号/会话/限速/审计/端点真实化 + client zod 镜像 | ✅ 含审计修复 |
+| M2 | 安全入口：TLS + 认证门 + HTTP/WS 反向代理 + 登录页 | ✅ 含审计修复 |
+| M3 | 通行密钥（WebAuthn）服务 + 入口路由 + 内联登录页 passkey JS | ✅ 含审计修复 |
+| M4 | 设置界面 + 部署文档 + 实机验证 | 规划中（下一步） |
+
+> M1–M3 各自经过攻击者视角安全审计并修复（严重发现含：首次初始化悖论、
+> IP 限速分层、用户名枚举时序、challenge 一致性等）；另有全项目三轮
+> 安全复审（路径规范化统一、自锁死防护、set-cookie 数组、资源边界）
+> 已合入 dev 分支。
