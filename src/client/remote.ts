@@ -80,6 +80,23 @@ export const remoteEnvelopeVoidSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
 ])
 
+/** passkey 请求 schema（M3）。 */
+export const passkeyRegisterBeginRequestSchema = z.object({
+  username: z.string(),
+})
+export const passkeyRegisterCompleteRequestSchema = z.object({
+  username: z.string(),
+  credential: z.unknown(),
+})
+export const passkeyLoginBeginRequestSchema = z.object({
+  username: z.string().optional(),
+})
+export const passkeyLoginCompleteRequestSchema = z.object({
+  assertion: z.unknown(),
+})
+/** WebAuthn options（PublicKeyCredentialCreationOptionsJSON / RequestOptionsJSON 的宽松镜像——字段由浏览器端消费）。 */
+export const passkeyOptionsSchema = z.record(z.string(), z.unknown())
+
 export const remoteEnvelopeSettingsSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), value: securitySettingsSchema }),
   z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
@@ -182,6 +199,41 @@ export const securityRemoteContribution = {
       cancellation: { parameter: 'signal' },
       parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#AuditReadRequest', schema: auditReadRequestSchema } }],
       result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#AuditReadResult', schema: auditReadResultSchema },
+    },
+    // ── passkey 端点（M3）──
+    {
+      id: 'dsh-web-security#security/passkeyRegisterBegin',
+      service: 'security', namespace: 'security', method: 'passkeyRegisterBegin',
+      invocation: { kind: 'direct' },
+      parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#PasskeyRegisterBeginRequest', schema: passkeyRegisterBeginRequestSchema } }],
+      result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#RemoteEnvelope<unknown>', schema: z.discriminatedUnion('ok', [
+        z.object({ ok: z.literal(true), value: passkeyOptionsSchema }),
+        z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
+      ]) },
+    },
+    {
+      id: 'dsh-web-security#security/passkeyRegisterComplete',
+      service: 'security', namespace: 'security', method: 'passkeyRegisterComplete',
+      invocation: { kind: 'direct' },
+      parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#PasskeyRegisterCompleteRequest', schema: passkeyRegisterCompleteRequestSchema } }],
+      result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#RemoteEnvelope<void>', schema: remoteEnvelopeVoidSchema },
+    },
+    {
+      id: 'dsh-web-security#security/passkeyLoginBegin',
+      service: 'security', namespace: 'security', method: 'passkeyLoginBegin',
+      invocation: { kind: 'direct' },
+      parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#PasskeyLoginBeginRequest', schema: passkeyLoginBeginRequestSchema } }],
+      result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#RemoteEnvelope<unknown>', schema: z.discriminatedUnion('ok', [
+        z.object({ ok: z.literal(true), value: passkeyOptionsSchema }),
+        z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
+      ]) },
+    },
+    {
+      id: 'dsh-web-security#security/passkeyLoginComplete',
+      service: 'security', namespace: 'security', method: 'passkeyLoginComplete',
+      invocation: { kind: 'direct' },
+      parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#PasskeyLoginCompleteRequest', schema: passkeyLoginCompleteRequestSchema } }],
+      result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#LoginResult', schema: loginResultSchema },
     },
   ],
 }
