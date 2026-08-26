@@ -120,6 +120,10 @@ try {
     readSettings: () => ({ passwordLogin: true, passkeyLogin: false, sessionTtlMinutes: 480, maxLoginAttempts: 5, rateLimitWindowMinutes: 15, auditEnabled: true }),
     writeSettings: async () => ({ ok: false, error: { code: 'stub', message: 'stub' } }),
     config: { enabled: true, entry: { host: '127.0.0.1', port: 13443, tls: 'http' }, rpID: '' },
+    passkeyRegisterBegin: async () => { throw new Error('passkey not available') },
+    passkeyRegisterComplete: async () => ({ ok: false, error: { code: 'not-available', message: 'passkey not available' } }),
+    passkeyLoginBegin: async () => { throw new Error('passkey not available') },
+    passkeyLoginComplete: async () => ({ ok: false, code: 'bad-credentials' }),
   }
   const entry = createEntryServer(entryDeps, {
     host: '127.0.0.1', port: 13555, tlsMode: 'http', certPath: null, keyPath: null,
@@ -138,7 +142,24 @@ try {
   const pageResp = await fetch('http://127.0.0.1:13555/security/login')
   const pageHtml = await pageResp.text()
   if (!pageHtml.includes('dsh 安全登录')) throw new Error('登录页 HTML 不含标题')
-  console.log('✅ 登录页 HTML 可访问（M2）')
+  if (!pageHtml.includes('passkeyBtn')) throw new Error('登录页 HTML 不含 passkey 按钮（M3）')
+  console.log('✅ 登录页 HTML 可访问（M2+M3 passkey 按钮存在）')
+
+  // M3：status 端点 methods 含 passkey 字段
+  const statusResp = await fetch('http://127.0.0.1:13555/security/api/status')
+  const statusJson = await statusResp.json()
+  if (!('passkey' in statusJson.methods)) throw new Error('status.methods 缺 passkey 字段')
+  console.log('✅ status 端点返回 passkey 开关（M3）')
+
+  // M3：passkey login/begin 路由可调（rpID 未配置时 stub deps 会抛错——验证路由可达即可）
+  const pkBeginResp = await fetch('http://127.0.0.1:13555/security/api/passkey/login/begin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  // rpID='' → stub deps 的 passkeyLoginBegin 抛错 → 400。路由可达即通过。
+  if (pkBeginResp.status === 404) throw new Error('passkey login/begin 路由 404')
+  console.log(`✅ passkey login/begin 路由可达（M3，status=${pkBeginResp.status}）`)
 
   await entry.stop()
   upstream.close()

@@ -119,6 +119,11 @@ export interface SecurityDeps {
   writeSettings(partial: Partial<SecuritySettings>): Promise<{ ok: true; value: SecuritySettings } | { ok: false; error: { code: string; message: string } }>
   // 配置面
   readonly config: { enabled: boolean; entry: { host: string; port: number; tls: string }; rpID: string }
+  // passkey 面（M3）
+  passkeyRegisterBegin(username: string): Promise<unknown>
+  passkeyRegisterComplete(username: string, credential: unknown): Promise<RemoteEnvelope<void>>
+  passkeyLoginBegin(username?: string): Promise<unknown>
+  passkeyLoginComplete(assertion: unknown, ip: string): Promise<LoginResult>
 }
 
 /** 安全端点完整接口（宿主 @Remote 逐一委托的方法面）。 */
@@ -143,6 +148,32 @@ export interface SecurityEndpoints {
   settingsWrite(request: SettingsWriteRequest): Promise<RemoteEnvelope<SecuritySettings>>
   /** 审计日志读取（分页）。 */
   auditRead(request: AuditReadRequest, signal?: AbortSignal): Promise<AuditReadResult>
+  /** passkey 注册开始（已认证用户）。 */
+  passkeyRegisterBegin(request: PasskeyRegisterBeginRequest): Promise<RemoteEnvelope<unknown>>
+  /** passkey 注册完成。 */
+  passkeyRegisterComplete(request: PasskeyRegisterCompleteRequest): Promise<RemoteEnvelope<void>>
+  /** passkey 登录开始（public）。 */
+  passkeyLoginBegin(request: PasskeyLoginBeginRequest): Promise<RemoteEnvelope<unknown>>
+  /** passkey 登录完成（public）。 */
+  passkeyLoginComplete(request: PasskeyLoginCompleteRequest): Promise<LoginResult>
+}
+
+/** passkey 注册开始请求。 */
+export interface PasskeyRegisterBeginRequest {
+  readonly username: string
+}
+/** passkey 注册完成请求。 */
+export interface PasskeyRegisterCompleteRequest {
+  readonly username: string
+  readonly credential: unknown
+}
+/** passkey 登录开始请求（username 可选——无用户名时用 discoverable credentials）。 */
+export interface PasskeyLoginBeginRequest {
+  readonly username?: string
+}
+/** passkey 登录完成请求。 */
+export interface PasskeyLoginCompleteRequest {
+  readonly assertion: unknown
 }
 
 /**
@@ -242,6 +273,34 @@ export function createHostSecurityEndpoints(
 
     async auditRead(request: AuditReadRequest, _signal?: AbortSignal): Promise<AuditReadResult> {
       return deps.readAudit(request.offset, request.limit)
+    },
+
+    async passkeyRegisterBegin(request: PasskeyRegisterBeginRequest): Promise<RemoteEnvelope<unknown>> {
+      try {
+        const options = await deps.passkeyRegisterBegin(request.username)
+        return { ok: true, value: options }
+      } catch (error) {
+        return { ok: false, error: { code: 'passkey-register-begin-failed', message: error instanceof Error ? error.message : String(error) } }
+      }
+    },
+
+    async passkeyRegisterComplete(request: PasskeyRegisterCompleteRequest): Promise<RemoteEnvelope<void>> {
+      const result = await deps.passkeyRegisterComplete(request.username, request.credential)
+      return result
+    },
+
+    async passkeyLoginBegin(request: PasskeyLoginBeginRequest): Promise<RemoteEnvelope<unknown>> {
+      try {
+        const options = await deps.passkeyLoginBegin(request.username)
+        return { ok: true, value: options }
+      } catch (error) {
+        return { ok: false, error: { code: 'passkey-login-begin-failed', message: error instanceof Error ? error.message : String(error) } }
+      }
+    },
+
+    async passkeyLoginComplete(request: PasskeyLoginCompleteRequest): Promise<LoginResult> {
+      // IP 在 typert 端点层不可获取（审计 S2），传 'loopback' 占位。
+      return deps.passkeyLoginComplete(request.assertion, 'loopback')
     },
   }
 }
