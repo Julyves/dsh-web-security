@@ -56,6 +56,17 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
 const form = document.getElementById('loginForm');
 const err = document.getElementById('error');
 const btn = document.getElementById('loginBtn');
+const passkeyBtn = document.getElementById('passkeyBtn');
+
+// 启动时查询登录方式开关。
+(async () => {
+  try {
+    const resp = await fetch('/security/api/status');
+    const status = await resp.json();
+    if (status.methods.passkey === true) { passkeyBtn.disabled = false; }
+  } catch (ex) { /* status 不可用 → passkey 保持 disabled */ }
+})();
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   err.textContent = '';
@@ -75,6 +86,80 @@ form.addEventListener('submit', async (e) => {
   } catch (ex) { err.textContent = '网络错误'; }
   finally { btn.disabled = false; }
 });
+
+// ── passkey 登录（M3）──
+passkeyBtn.addEventListener('click', async () => {
+  err.textContent = '';
+  passkeyBtn.disabled = true;
+  try {
+    // begin：请求认证选项。
+    const usernameField = document.getElementById('username').value;
+    const beginResp = await fetch('/security/api/passkey/login/begin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(usernameField ? { username: usernameField } : {}),
+    });
+    const beginResult = await beginResp.json();
+    if (!beginResult.ok) { err.textContent = beginResult.error || 'passkey 不可用'; return; }
+
+    // 浏览器 WebAuthn 断言（base64url 解码 challenge）。
+    const options = beginResult.options;
+    options.challenge = base64urlToBuffer(options.challenge);
+    if (options.allowCredentials) {
+      for (const cred of options.allowCredentials) cred.id = base64urlToBuffer(cred.id);
+    }
+    const assertion = await navigator.credentials.get({ publicKey: options });
+    if (!assertion) { err.textContent = 'passkey 取消'; return; }
+
+    // 序列化断言（ArrayBuffer → base64url）。
+    const assertionJSON = serializeAssertion(assertion);
+
+    // complete：验证断言。
+    const completeResp = await fetch('/security/api/passkey/login/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assertion: assertionJSON }),
+    });
+    const completeResult = await completeResp.json();
+    if (completeResult.ok) { window.location.href = '/'; }
+    else if (completeResult.code === 'locked') { err.textContent = '登录尝试过多'; }
+    else { err.textContent = 'passkey 验证失败'; }
+  } catch (ex) {
+    err.textContent = ex.name === 'NotAllowedError' ? 'passkey 操作取消或超时' : 'passkey 错误';
+  } finally { passkeyBtn.disabled = false; }
+});
+
+function base64urlToBuffer(b64url) {
+  const pad = '='.repeat((4 - b64url.length % 4) % 4);
+  const base64 = (b64url + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const buf = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+  return buf.buffer;
+}
+
+function bufferToBase64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let str = '';
+  for (const byte of bytes) str += String.fromCharCode(byte);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function serializeAssertion(credential) {
+  const r = credential.response;
+  return {
+    id: credential.id,
+    rawId: bufferToBase64url(credential.rawId),
+    type: credential.type,
+    clientExtensionResults: {},
+    response: {
+      clientDataJSON: bufferToBase64url(r.clientDataJSON),
+      authenticatorData: bufferToBase64url(r.authenticatorData),
+      signature: bufferToBase64url(r.signature),
+      userHandle: r.userHandle ? bufferToBase64url(r.userHandle) : undefined,
+    },
+  };
+}
 </script>
 </body>
 </html>`
@@ -148,8 +233,33 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({
         enabled: deps.config.enabled,
-        methods: { password: settings.passwordLogin, passkey: deps.config.rpID.length > 0 },
+        methods: { password: settings.passwordLogin, passkey: deps.config.rpID.length > 0 && settings.passkeyLogin },
       }))
+      return
+    }
+
+    // ── passkey API（M3）──
+
+    if (path === '/security/api/passkey/login/begin' && req.method === 'POST') {
+      await handlePasskeyLoginBegin(req, res)
+      return
+    }
+
+    if (path === '/security/api/passkey/login/complete' && req.method === 'POST') {
+      await handlePasskeyLoginComplete(req, res)
+      return
+    }
+
+    // passkey 注册需要已认证（authenticated）。
+    if (path === '/security/api/passkey/register/begin' && req.method === 'POST') {
+      if (!requireAuth(req, res)) return
+      await handlePasskeyRegisterBegin(req, res)
+      return
+    }
+
+    if (path === '/security/api/passkey/register/complete' && req.method === 'POST') {
+      if (!requireAuth(req, res)) return
+      await handlePasskeyRegisterComplete(req, res)
       return
     }
 
@@ -241,6 +351,111 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
       'location': '/security/login',
     })
     res.end()
+  }
+
+  // ── passkey API handlers（M3）──
+
+  /** 读取 JSON body（限制 256KB——WebAuthn 响应含证书链可能较大）。 */
+  async function readJsonBody(req: IncomingMessage, res: ServerResponse): Promise<unknown | undefined> {
+    const MAX_BODY = 262_144
+    let body = ''
+    for await (const chunk of req) {
+      body += chunk.toString()
+      if (Buffer.byteLength(body, 'utf8') > MAX_BODY) {
+        res.writeHead(413, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'body too large' }))
+        return undefined
+      }
+    }
+    try {
+      return JSON.parse(body)
+    } catch {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'invalid JSON' }))
+      return undefined
+    }
+  }
+
+  /** passkey 注册开始：返回 PublicKeyCredentialCreationOptionsJSON。 */
+  async function handlePasskeyRegisterBegin(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await readJsonBody(req, res)
+    if (body === undefined) return
+    const username = (body as { username?: unknown }).username
+    if (typeof username !== 'string') {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'missing username' }))
+      return
+    }
+    try {
+      const options = await deps.passkeyRegisterBegin(username)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, options }))
+    } catch (error) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  /** passkey 注册完成：验证注册响应并存储凭证。 */
+  async function handlePasskeyRegisterComplete(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await readJsonBody(req, res)
+    if (body === undefined) return
+    const { username, credential } = body as { username?: unknown; credential?: unknown }
+    if (typeof username !== 'string' || typeof credential !== 'object' || credential === null) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'missing username or credential' }))
+      return
+    }
+    const result = await deps.passkeyRegisterComplete(username, credential)
+    res.writeHead(result.ok ? 200 : 400, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(result))
+  }
+
+  /** passkey 登录开始：返回 PublicKeyCredentialRequestOptionsJSON。 */
+  async function handlePasskeyLoginBegin(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await readJsonBody(req, res)
+    if (body === undefined) return
+    const username = (body as { username?: unknown }).username
+    try {
+      const options = await deps.passkeyLoginBegin(typeof username === 'string' ? username : undefined)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, options }))
+    } catch (error) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  /** passkey 登录完成：验证断言 → 创建会话 → Set-Cookie。 */
+  async function handlePasskeyLoginComplete(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const ip = getClientIp(req)
+    // IP 维度限速（与密码登录同门）。
+    const gate = ipLimiter.gate(ip)
+    if (gate.state === 'locked') {
+      res.writeHead(429, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, code: 'locked', retryAfterMs: gate.retryAfterMs }))
+      return
+    }
+    const body = await readJsonBody(req, res)
+    if (body === undefined) return
+    const assertion = (body as { assertion?: unknown }).assertion
+    if (typeof assertion !== 'object' || assertion === null) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'missing assertion' }))
+      return
+    }
+    const result = await deps.passkeyLoginComplete(assertion, ip)
+    if (result.ok) {
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'set-cookie': result.cookie,
+      })
+      res.end(JSON.stringify({ ok: true }))
+    } else {
+      if (result.code === 'bad-credentials') ipLimiter.recordFailure(ip)
+      res.writeHead(401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(result))
+    }
   }
 
   /** upgrade 事件：认证门 → 代理转发。 */
