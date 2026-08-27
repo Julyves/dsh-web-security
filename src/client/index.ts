@@ -1,12 +1,17 @@
 /**
- * dsh-web-security client 入口：Cordis 约定字段 + 委托。
+ * dsh-web-security client 入口：Cordis 约定字段 + 设置页装配（M4）。
  *
- * 骨架阶段仅声明注入面与标识；M4 起在这里：
- *   - 注册设置界面 slots（账号管理 / 入口配置 / 审计查看）；
- *   - 挂载 typert `security` 命名空间 Remote（child fiber 读取，防死锁）；
- *   - 登录门状态轮询（登录页与设置界面的状态联动）。
- * 登录页本身是独立零框架 bundle（src/client/login/，M3），不经本入口加载。
+ * 装配顺序：
+ *   1. 注册 settings.security 词典（zh/en）；
+ *   2. 经 slots.inject 等待宿主 settings.section 声明后注册「安全」页
+ *      （id=security；label thunk 跟随 locale）。
+ *
+ * remote 消费（remote.security）由后续纵切经 inject 面闭包接入；
+ * 主 fiber inject 不声明 remote.security（防自挂载服务死锁——指南 7.2）。
  */
+import type { Context } from '@deepseek-ai/cordis'
+import { SecuritySection } from './settings/SecuritySection.tsx'
+import { zh, en } from './locales'
 
 /** Cordis 插件约定：声明需要的服务。 */
 export const inject = ['slots', 'remote', 'locale'] as const
@@ -14,7 +19,21 @@ export const inject = ['slots', 'remote', 'locale'] as const
 /** 插件标识（与包名一致）。 */
 export const name = 'dsh-web-security'
 
-/** Cordis 插件入口：适配 Context 后委托给纯业务函数（M4 填充）。 */
-export function apply(ctx: unknown): void {
-  void ctx
+/** 词典命名空间。 */
+const NS = 'settings.security'
+
+/** Cordis 插件入口：注册词典 + 设置页槽位贡献。 */
+export function apply(ctx: Context): void {
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'web-security: dictionaries')
+
+  const t = ctx.locale.bind(NS)
+
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'security',
+    order: 100,
+    label: () => t('page'),
+    locale: NS,
+    inject: () => ({ t }),
+  }, SecuritySection as never))
 }

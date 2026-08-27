@@ -22,15 +22,17 @@ const BUNDLE_ID = 'dsh-web-security'
 // 先清空 lib/：防止陈旧产物（旧 sourcemap、被移除模块的声明）混入发布面。
 rmSync(resolve(ROOT, 'lib'), { recursive: true, force: true })
 
-/** 浏览器 loader 提供的平台模块；bundle 中必须保持 external。 */
+/** 浏览器 loader 提供的平台模块；bundle 中必须保持 external。
+ * 精确对齐宿主 web shell 的冻结静态模块表
+ * （deepseek-harness packages/client/web/src/platform.ts 的 PLATFORM_MODULES）：
+ * react 系 + cordis + ui-slots + ui-primitives。其余 @deepseek-ai/dsh-client-*
+ * 不在静态表内（如 schema-form/web-react/ui-attachment），引用它们会在运行时
+ * 因 loader 模块表无法解析而失败——不得列入。 */
 const PLATFORM_MODULES = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client',
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
-  '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-ui-attachment',
-  '@deepseek-ai/dsh-client-schema-form',
 ]
 
 /** 运行时解析的外部包：宿主 dsh 安装提供 @deepseek-ai/*（peerDependencies）。 */

@@ -94,6 +94,11 @@ export const passkeyLoginBeginRequestSchema = z.object({
 export const passkeyLoginCompleteRequestSchema = z.object({
   assertion: z.unknown(),
 })
+/** passkey 移除请求（M4）。 */
+export const passkeyRemoveRequestSchema = z.object({
+  username: z.string(),
+  credentialId: z.string(),
+})
 /** WebAuthn options（PublicKeyCredentialCreationOptionsJSON / RequestOptionsJSON 的宽松镜像——字段由浏览器端消费）。 */
 export const passkeyOptionsSchema = z.record(z.string(), z.unknown())
 
@@ -234,6 +239,14 @@ export const securityRemoteContribution = {
       invocation: { kind: 'direct' },
       parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#PasskeyLoginCompleteRequest', schema: passkeyLoginCompleteRequestSchema } }],
       result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#LoginResult', schema: loginResultSchema },
+    },
+    // ── passkey 移除（M4）──
+    {
+      id: 'dsh-web-security#security/passkeyRemove',
+      service: 'security', namespace: 'security', method: 'passkeyRemove',
+      invocation: { kind: 'direct' },
+      parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#PasskeyRemoveRequest', schema: passkeyRemoveRequestSchema } }],
+      result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#RemoteEnvelope<void>', schema: remoteEnvelopeVoidSchema },
     },
   ],
 }

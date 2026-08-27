@@ -38,15 +38,23 @@ async function createRealDeps(dataRoot: string): Promise<SecurityDeps> {
     createSession: (u, ip) => sessions.create(u, ip),
     resolveSession: (t) => { const e = sessions.resolve(t); return e === undefined ? undefined : { username: e.username } },
     revokeSession: (t) => sessions.revoke(t),
+    revokeSessionsForUser: (u) => sessions.revokeAllForUser(u),
     recordEvent: (e) => audit.append(e),
     readAudit: (o, l) => audit.read(o, l),
     readSettings: () => settings.read(),
     writeSettings: (p) => settings.write(p),
-    config: { enabled: true, entry: { host: '0.0.0.0', port: 3443, tls: 'http' }, rpID: '' },
+    config: { enabled: true, entry: { host: '0.0.0.0', port: 3443, tls: 'http' }, rpID: '', diagnostics: [] },
     passkeyRegisterBegin: async () => { throw new Error('passkey not available') },
     passkeyRegisterComplete: async () => ({ ok: false, error: { code: 'not-available', message: 'passkey not available' } }),
     passkeyLoginBegin: async () => { throw new Error('passkey not available') },
     passkeyLoginComplete: async () => ({ ok: false, code: 'bad-credentials' }),
+    listPasskeys: async () => accounts.listPasskeys('admin'),
+    removePasskey: async (u, id) => {
+      const before = await accounts.listPasskeys(u)
+      if (!before.some(p => p.credentialId === id)) return false
+      await accounts.removePasskey(u, id)
+      return true
+    },
   }
 }
 

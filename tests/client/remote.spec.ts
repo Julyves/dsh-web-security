@@ -10,6 +10,7 @@ import {
   accountRemoveRequestSchema, settingsWriteRequestSchema, securitySettingsSchema,
   remoteEnvelopeVoidSchema, remoteEnvelopeSettingsSchema,
   auditReadRequestSchema, auditReadResultSchema,
+  passkeyRemoveRequestSchema, securityRemoteContribution,
 } from '../../src/client/remote'
 
 describe('zod 镜像同步', () => {
@@ -122,5 +123,23 @@ describe('zod 镜像同步', () => {
       events: [{ kind: 'login-success', at: 1700000000000, actor: 'admin', ip: '127.0.0.1' }],
       hasMore: true,
     })).toEqual(expect.any(Object))
+  })
+
+  // ── passkeyRemove（M4）──
+
+  it('passkeyRemoveRequest：合法样本', () => {
+    expect(passkeyRemoveRequestSchema.parse({ username: 'admin', credentialId: 'credAAAA' }))
+      .toEqual({ username: 'admin', credentialId: 'credAAAA' })
+  })
+
+  it('passkeyRemoveRequest：缺 credentialId 拒绝', () => {
+    expect(() => passkeyRemoveRequestSchema.parse({ username: 'admin' })).toThrow()
+  })
+
+  it('descriptor 表：passkeyRemove 端点存在且结果为 RemoteEnvelope<void>', () => {
+    const d = securityRemoteContribution.descriptors.find(x => x.method === 'passkeyRemove')
+    expect(d).toBeDefined()
+    expect(d?.id).toBe('dsh-web-security#security/passkeyRemove')
+    expect(d?.parameters[0]?.name).toBe('request')
   })
 })

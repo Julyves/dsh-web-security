@@ -86,6 +86,29 @@ describe('createSessionStore', () => {
     // sweep 后内部 Map 应为空（无法直接验证，但 sweep 不抛错即正确）
     expect(() => store.sweep()).not.toThrow()
   })
+
+  it('revokeAllForUser 撤销该用户会话且不影响他人（M4）', () => {
+    const store = createSessionStore(480)
+    const { token: t1 } = store.create('admin', '127.0.0.1')
+    const { token: t2 } = store.create('other', '127.0.0.1')
+    store.revokeAllForUser('admin')
+    expect(store.resolve(t1)).toBeUndefined()
+    expect(store.resolve(t2)?.username).toBe('other')
+  })
+
+  it('revokeAllForUser 对无会话用户为 no-op（M4）', () => {
+    const store = createSessionStore(480)
+    expect(() => store.revokeAllForUser('ghost')).not.toThrow()
+  })
+
+  it('revokeAllForUser 后同名再登录可创建新会话（M4）', () => {
+    const store = createSessionStore(480)
+    const { token: t1 } = store.create('admin', '127.0.0.1')
+    store.revokeAllForUser('admin')
+    const { token: t2 } = store.create('admin', '10.0.0.1')
+    expect(t1).not.toBe(t2)
+    expect(store.resolve(t2)?.username).toBe('admin')
+  })
 })
 
 describe('parseSessionToken', () => {

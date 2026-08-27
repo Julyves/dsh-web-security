@@ -32,6 +32,8 @@ export function createSessionStore(ttlMinutes: number, secureCookie = true): {
   create: (username: string, ip: string) => { token: string; cookie: string }
   resolve: (token: string) => SessionEntry | undefined
   revoke: (token: string) => void
+  /** 撤销某用户全部活跃会话（账号删除联动——M4）。 */
+  revokeAllForUser: (username: string) => void
   sweep: () => void
 } {
   const ttlMs = ttlMinutes * 60_000
@@ -83,6 +85,15 @@ export function createSessionStore(ttlMinutes: number, secureCookie = true): {
     }
   }
 
+  /** 撤销某用户全部活跃会话（账号删除联动——M4）。 */
+  function revokeAllForUser(username: string): void {
+    const token = userTokens.get(username)
+    if (token !== undefined) {
+      sessions.delete(token)
+      userTokens.delete(username)
+    }
+  }
+
   function sweep(): void {
     const t = now()
     for (const [token, entry] of sessions) {
@@ -93,7 +104,7 @@ export function createSessionStore(ttlMinutes: number, secureCookie = true): {
     }
   }
 
-  return { create, resolve, revoke, sweep }
+  return { create, resolve, revoke, revokeAllForUser, sweep }
 }
 
 /**

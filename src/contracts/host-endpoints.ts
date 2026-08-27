@@ -111,6 +111,8 @@ export interface SecurityDeps {
   createSession(username: string, ip: string): { token: string; cookie: string }
   resolveSession(token: string): { username: string } | undefined
   revokeSession(token: string): void
+  /** 撤销某用户全部活跃会话（账号删除联动——M4）。 */
+  revokeSessionsForUser(username: string): void
   // 审计面
   recordEvent(event: AuthEvent): void
   readAudit(offset: number, limit: number): Promise<{ events: readonly AuthEvent[]; hasMore: boolean }>
@@ -118,12 +120,21 @@ export interface SecurityDeps {
   readSettings(): SecuritySettings
   writeSettings(partial: Partial<SecuritySettings>): Promise<{ ok: true; value: SecuritySettings } | { ok: false; error: { code: string; message: string } }>
   // 配置面
-  readonly config: { enabled: boolean; entry: { host: string; port: number; tls: string }; rpID: string }
+  readonly config: {
+    enabled: boolean
+    entry: { host: string; port: number; tls: string }
+    rpID: string
+    /** 部署诊断（如 3080 非 loopback 绑定警告；构造时一次性探测——M4）。 */
+    readonly diagnostics: readonly string[]
+  }
   // passkey 面（M3）
   passkeyRegisterBegin(username: string): Promise<unknown>
   passkeyRegisterComplete(username: string, credential: unknown): Promise<RemoteEnvelope<void>>
   passkeyLoginBegin(username?: string): Promise<unknown>
   passkeyLoginComplete(assertion: unknown, ip: string): Promise<LoginResult>
+  // passkey 面（M4）：移除
+  listPasskeys(username: string): Promise<readonly { readonly credentialId: string }[]>
+  removePasskey(username: string, credentialId: string): Promise<boolean>
 }
 
 /** 安全端点完整接口（宿主 @Remote 逐一委托的方法面）。 */
@@ -156,6 +167,8 @@ export interface SecurityEndpoints {
   passkeyLoginBegin(request: PasskeyLoginBeginRequest): Promise<RemoteEnvelope<unknown>>
   /** passkey 登录完成（public）。 */
   passkeyLoginComplete(request: PasskeyLoginCompleteRequest): Promise<LoginResult>
+  /** passkey 移除（已认证用户；M4）。 */
+  passkeyRemove(request: PasskeyRemoveRequest): Promise<RemoteEnvelope<void>>
 }
 
 /** passkey 注册开始请求。 */
@@ -174,6 +187,11 @@ export interface PasskeyLoginBeginRequest {
 /** passkey 登录完成请求。 */
 export interface PasskeyLoginCompleteRequest {
   readonly assertion: unknown
+}
+/** passkey 移除请求（M4）。 */
+export interface PasskeyRemoveRequest {
+  readonly username: string
+  readonly credentialId: string
 }
 
 /**
@@ -196,7 +214,7 @@ export function createHostSecurityEndpoints(
           port: deps.config.entry.port,
           tls: deps.config.entry.tls as 'self-signed' | 'custom' | 'none',
         },
-        diagnostics: [],
+        diagnostics: deps.config.diagnostics,
       }
     },
 
@@ -254,6 +272,9 @@ export function createHostSecurityEndpoints(
       try {
         await deps.removeAccount(request.username)
         deps.recordEvent({ kind: 'account-removed', at: Date.now(), actor: request.username })
+        // 会话联动（M4）：被删账号的活跃会话立即失效（防已登录被删用户继续操作）。
+        deps.revokeSessionsForUser(request.username)
+        deps.recordEvent({ kind: 'session-expired', at: Date.now(), actor: request.username, detail: '账号删除，会话全部撤销' })
         return { ok: true, value: undefined }
       } catch (error) {
         return { ok: false, error: { code: 'remove-failed', message: error instanceof Error ? error.message : String(error) } }
@@ -309,6 +330,25 @@ export function createHostSecurityEndpoints(
     async passkeyLoginComplete(request: PasskeyLoginCompleteRequest): Promise<LoginResult> {
       // IP 在 typert 端点层不可获取（审计 S2），传 'loopback' 占位。
       return deps.passkeyLoginComplete(request.assertion, 'loopback')
+    },
+
+    async passkeyRemove(request: PasskeyRemoveRequest): Promise<RemoteEnvelope<void>> {
+      // 自锁死防护（同 settingsWrite 的 X2 范式）：移除某账号最后一个 passkey
+      // 且密码登录已关闭时拒绝——否则该账号（部署内）无任何登录途径。
+      const passkeys = await deps.listPasskeys(request.username)
+      if (!passkeys.some(p => p.credentialId === request.credentialId)) {
+        return { ok: false, error: { code: 'passkey-not-found', message: `passkey ${request.credentialId.slice(0, 8)} 不存在于账号 ${JSON.stringify(request.username)}` } }
+      }
+      const isLast = passkeys.length === 1
+      if (isLast && !deps.readSettings().passwordLogin) {
+        return { ok: false, error: { code: 'lockout-prevented', message: '该账号仅剩此通行密钥且密码登录已关闭，移除后将无法登录（防自锁死）' } }
+      }
+      const removed = await deps.removePasskey(request.username, request.credentialId)
+      if (!removed) {
+        return { ok: false, error: { code: 'passkey-not-found', message: `passkey ${request.credentialId.slice(0, 8)} 不存在（可能已被移除）` } }
+      }
+      deps.recordEvent({ kind: 'passkey-removed', at: Date.now(), actor: request.username, detail: `credentialId=${request.credentialId.slice(0, 8)}` })
+      return { ok: true, value: undefined }
     },
   }
 }

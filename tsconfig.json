@@ -18,7 +18,17 @@
     "paths": {
       "@deepseek-ai/cordis": ["./src/adapters/dsh/types/cordis.d.ts"],
       "@deepseek-ai/dsh-typert-protocol": ["./src/adapters/dsh/types/typert-protocol.d.ts"],
-      "@deepseek-ai/dsh-host-webserver": ["./src/adapters/dsh/types/webserver.d.ts"]
+      "@deepseek-ai/dsh-host-webserver": ["./src/adapters/dsh/types/webserver.d.ts"],
+      "@deepseek-ai/dsh-client-runtime": ["./src/adapters/dsh/types/client-runtime.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/client": ["./src/adapters/dsh/types/client-runtime.d.ts"],
+      "@deepseek-ai/dsh-client-locale": ["./src/adapters/dsh/types/client-locale.d.ts"],
+      "@deepseek-ai/dsh-client-locale/client": ["./src/adapters/dsh/types/client-locale.d.ts"],
+      "@deepseek-ai/dsh-client-ui-slots": ["./src/adapters/dsh/types/client-ui-slots.d.ts"],
+      "@deepseek-ai/dsh-client-ui-slots/client": ["./src/adapters/dsh/types/client-ui-slots.d.ts"],
+      "@deepseek-ai/dsh-client-ui-settings": ["./src/adapters/dsh/types/client-ui-settings.d.ts"],
+      "@deepseek-ai/dsh-client-ui-settings/client": ["./src/adapters/dsh/types/client-ui-settings.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["./src/adapters/dsh/types/client-ui-primitives.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives/client": ["./src/adapters/dsh/types/client-ui-primitives.d.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "types/**/*.d.ts"]

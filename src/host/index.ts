@@ -32,7 +32,7 @@ import type {
   SecurityStatus, SettingsReadRequest, SettingsWriteRequest,
   StatusRequest, LogoutRequest, AccountsListRequest,
   PasskeyRegisterBeginRequest, PasskeyRegisterCompleteRequest,
-  PasskeyLoginBeginRequest, PasskeyLoginCompleteRequest,
+  PasskeyLoginBeginRequest, PasskeyLoginCompleteRequest, PasskeyRemoveRequest,
 } from '../contracts/host-endpoints'
 import type { AuthEvent } from '../contracts/auth-events'
 
@@ -49,10 +49,15 @@ export class SecurityService extends TypertRemoteService {
   private readonly endpoints: SecurityEndpoints
   /** 规范化后的插件配置（供账号/会话/入口模块装配）。 */
   private readonly normalizedConfig: SecurityConfig
+  /** 宿主 webServer 绑定地址（构造时探测；缺失为 undefined）。 */
+  private readonly webServerHost: '127.0.0.1' | '0.0.0.0' | undefined
 
   constructor(ctx: Context, config: unknown) {
     super(ctx, 'security')
     this.normalizedConfig = normalizeConfig(config)
+    // 部署诊断探测（M4）：读宿主 webServer 实际绑定（服务缺失降级为 undefined）。
+    const webServer = ctx.get<{ host?: '127.0.0.1' | '0.0.0.0' } | undefined>('webServer')
+    this.webServerHost = typeof webServer?.host === 'string' ? webServer.host : undefined
     const deps = this.buildDeps()
     this.endpoints = createHostSecurityEndpoints(deps)
     // 装配入口服务器（蓝图 D2/D4——安全入口 + 认证门 + 反向代理）。
@@ -131,6 +136,7 @@ export class SecurityService extends TypertRemoteService {
         return e === undefined ? undefined : { username: e.username }
       },
       revokeSession: (token) => sessions.revoke(token),
+      revokeSessionsForUser: (username) => sessions.revokeAllForUser(username),
       // 审计面
       recordEvent: (e: AuthEvent) => audit.append(e),
       readAudit: (offset, limit) => audit.read(offset, limit),
@@ -142,6 +148,11 @@ export class SecurityService extends TypertRemoteService {
         enabled: cfg.enabled,
         entry: { host: cfg.entry.host, port: cfg.entry.port, tls: cfg.entry.tls.certPath !== null ? 'custom' : 'self-signed' },
         rpID: cfg.rpID,
+        // 部署诊断（M4）：3080 非 loopback 绑定时警告（蓝图风险 2——宿主
+        // resolveLanTrust 会把 LAN IPv4 自动并入 trustedHosts，绕过认证门）。
+        diagnostics: this.webServerHost !== undefined && this.webServerHost !== '127.0.0.1'
+          ? [`host-webserver 绑定 ${this.webServerHost}:3080：LAN 设备可绕过认证门直连 3080 API（改绑 127.0.0.1）`]
+          : [],
       },
       // passkey 面（M3）
       passkeyRegisterBegin: webauthn !== undefined
@@ -156,6 +167,14 @@ export class SecurityService extends TypertRemoteService {
       passkeyLoginComplete: webauthn !== undefined
         ? (a, ip) => webauthn.loginComplete(a as never, ip)
         : passkeyNotAvailable,
+      // passkey 移除面（M4）：account-store.removePasskey 已有（M3），包装存在性判定。
+      listPasskeys: (u) => accounts.listPasskeys(u),
+      removePasskey: async (u, credentialId) => {
+        const before = await accounts.listPasskeys(u)
+        if (!before.some(p => p.credentialId === credentialId)) return false
+        await accounts.removePasskey(u, credentialId)
+        return true
+      },
     }
     return deps
   }
@@ -244,6 +263,12 @@ export class SecurityService extends TypertRemoteService {
   @Remote('passkeyLoginComplete')
   async passkeyLoginComplete(request: PasskeyLoginCompleteRequest): Promise<LoginResult> {
     return this.endpoints.passkeyLoginComplete(request)
+  }
+
+  /** passkey 移除（已认证用户；M4）。 */
+  @Remote('passkeyRemove')
+  async passkeyRemove(request: PasskeyRemoveRequest): Promise<RemoteEnvelope<void>> {
+    return this.endpoints.passkeyRemove(request)
   }
 }
 
