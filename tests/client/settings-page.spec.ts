@@ -114,8 +114,17 @@ const ZH: Record<string, string> = {
   removeAccount: '删除账号',
   confirmRemove: '确认删除该账号？其活跃会话将被撤销。',
   passkeyTitle: '通行密钥',
+  registerPasskey: '注册通行密钥',
+  remove: '移除',
+  passkeyCancelled: '通行密钥操作已取消',
+  passkeyError: '通行密钥操作失败',
+  webauthnUnavailable: '此环境不支持通行密钥（需要 HTTPS 安全上下文）',
   policyTitle: '安全策略',
   auditTitle: '审计日志',
+  retry: '重试',
+  loadMore: '加载更多',
+  save: '保存',
+  downgradeConfirm: '本次变更会削弱安全姿态，确认执行？',
 }
 
 /** en 词典（Story 2b 断言字面量）。 */
@@ -137,8 +146,17 @@ const EN: Record<string, string> = {
   removeAccount: 'Remove account',
   confirmRemove: 'Remove this account? Its active sessions will be revoked.',
   passkeyTitle: 'Passkeys',
+  registerPasskey: 'Register passkey',
+  remove: 'Remove',
+  passkeyCancelled: 'Passkey operation cancelled',
+  passkeyError: 'Passkey operation failed',
+  webauthnUnavailable: 'Passkeys are unavailable in this context',
   policyTitle: 'Security policy',
   auditTitle: 'Audit log',
+  retry: 'Retry',
+  loadMore: 'Load more',
+  save: 'Save',
+  downgradeConfirm: 'This change weakens the security posture. Proceed?',
 }
 
 /** 设置受控 input 的值并派发 input 事件（React 兼容路径）。 */
@@ -538,6 +556,12 @@ function enableWebAuthn(create: () => Promise<unknown>): void {
   })
 }
 
+/** 恢复 WebAuthn 不可用环境（清除 stub；jsdom 原生 isSecureContext 为 undefined）。 */
+function disableWebAuthn(): void {
+  Object.defineProperty(window, 'isSecureContext', { value: undefined, configurable: true })
+  delete (window.navigator as { credentials?: unknown }).credentials
+}
+
 /** 构造 stub 注册凭证（rawId/response 各字段为 ArrayBuffer，如浏览器真形态）。 */
 function fakeRegistrationCredential(): unknown {
   const bytes = (s: string): ArrayBuffer => { const b = new Uint8Array([...s].map(c => c.charCodeAt(0))); return b.buffer }
@@ -720,7 +744,7 @@ describe('Story 9/10：安全策略表单', () => {
       error: { code: 'lockout-prevented', message: '不能同时关闭密码登录与通行密钥登录（防自锁死）' },
     }))
     const { ctx, slotFactories, registerCalls } = makeCtx({
-      remoteSecurity: { settingsRead: vi.fn(async () => DEFAULT_SETTINGS_SAMPLE), settingsWrite },
+      remoteSecurity: { settingsWrite },
     })
     bundle.exports.apply(ctx)
     const container = await renderSection(ctx, slotFactories, registerCalls)
@@ -735,6 +759,117 @@ describe('Story 9/10：安全策略表单', () => {
     const confirmBtn = block?.querySelector<HTMLButtonElement>('button[data-action="risk-confirm"]')
     await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(block?.textContent ?? '').toContain('不能同时关闭密码登录与通行密钥登录')
+    container.remove()
+  })
+})
+
+/** 生成 n 条审计事件样本（最新在前语义由 host 保证，样本独立构造）。 */
+function auditEvents(n: number, offset = 0): { kind: string; at: number; actor: string; ip?: string; detail?: string }[] {
+  return Array.from({ length: n }, (_, i) => ({
+    kind: 'login-success',
+    at: 1700000000000 + offset + i,
+    actor: `user${offset + i}`,
+  }))
+}
+
+describe('Story 11/12：审计日志查看器', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('Story 11：首屏拉取 offset=0 limit=50 + 加载更多推进 offset + hasMore=false 隐藏按钮', async () => {
+    const auditRead = vi.fn(async (request: { offset: number; limit: number }) => {
+      if (request.offset === 0) return { events: auditEvents(50), hasMore: true }
+      return { events: auditEvents(20, 50), hasMore: false }
+    })
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { auditRead },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    expect(auditRead).toHaveBeenCalledWith({ offset: 0, limit: 50 })
+    const block = container.querySelector('[data-block="audit"]')
+    expect(block).not.toBeNull()
+    // 首屏 50 条渲染。
+    expect(block?.querySelectorAll('[data-audit-item]').length).toBe(50)
+    const more = block?.querySelector<HTMLButtonElement>('button[data-action="audit-more"]')
+    expect(more).not.toBeNull()
+    await act(async () => { more?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(auditRead).toHaveBeenLastCalledWith({ offset: 50, limit: 50 })
+    // 追加后 70 条；hasMore=false → 按钮消失。
+    expect(block?.querySelectorAll('[data-audit-item]').length).toBe(70)
+    expect(container.querySelector('button[data-action="audit-more"]')).toBeNull()
+    container.remove()
+  })
+
+  it('Story 12：actor 含 <script> → 渲染为字面文本，DOM 无 script 注入', async () => {
+    const auditRead = vi.fn(async () => ({
+      events: [{
+        kind: 'login-failure',
+        at: 1700000000000,
+        actor: '<script>alert(1)</script>',
+        detail: '<img src=x onerror=alert(2)>',
+      }],
+      hasMore: false,
+    }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { auditRead },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const block = container.querySelector('[data-block="audit"]')
+    // 字面文本可见（React 转义）。
+    expect(block?.textContent ?? '').toContain('<script>alert(1)</script>')
+    // DOM 无 script 元素、无 img 元素注入。
+    expect(block?.querySelectorAll('script').length).toBe(0)
+    expect(block?.querySelectorAll('img').length).toBe(0)
+    container.remove()
+  })
+
+  it('Story 13：auditRead 失败 → 错误态 + 重试恢复', async () => {
+    let fail = true
+    const auditRead = vi.fn(async () => {
+      if (fail) throw new Error('网络断')
+      return { events: auditEvents(3), hasMore: false }
+    })
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { auditRead },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const block = container.querySelector('[data-block="audit"]')
+    expect(block?.getAttribute('data-state')).toBe('error')
+    expect(block?.textContent ?? '').toContain('加载失败')
+    fail = false
+    const retry = block?.querySelector<HTMLButtonElement>('button[data-action="audit-retry"]')
+    expect(retry).not.toBeNull()
+    await act(async () => { retry?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(container.querySelector('[data-block="audit"]')?.getAttribute('data-state')).toBe('ready')
+    expect(container.querySelectorAll('[data-audit-item]').length).toBe(3)
+    container.remove()
+  })
+})
+
+describe('Story 14：WebAuthn 不可用探测', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('无 credentials API/secure context → 注册入口禁用 + 原因文案', async () => {
+    disableWebAuthn()
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList: vi.fn(async () => [{ username: 'admin', hasPasskey: false, createdAt: 1 }]) },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const pick = container.querySelector<HTMLButtonElement>('button[data-action="passkey-account"][data-username="admin"]')
+    await act(async () => { pick?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const registerBtn = container.querySelector<HTMLButtonElement>('button[data-action="passkey-register"]')
+    expect(registerBtn).not.toBeNull()
+    expect(registerBtn?.disabled).toBe(true)
+    expect(container.textContent ?? '').toContain('此环境不支持通行密钥')
     container.remove()
   })
 })

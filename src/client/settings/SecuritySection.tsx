@@ -11,6 +11,7 @@ import type { FC, ReactNode } from 'react'
 import { AccountsBlock, type AccountsApi } from './AccountsBlock.tsx'
 import { PasskeysBlock, type PasskeysApi } from './PasskeysBlock.tsx'
 import { PolicyBlock, type PolicyApi } from './PolicyBlock.tsx'
+import { AuditBlock, type AuditApi } from './AuditBlock.tsx'
 
 /** 部署状态（SecurityStatus 的 UI 消费面）。 */
 export interface SecurityStatusView {
@@ -30,6 +31,8 @@ export interface SecuritySectionInjected {
   passkeys: PasskeysApi
   /** 策略面。 */
   policy: PolicyApi
+  /** 审计面。 */
+  audit: AuditApi
 }
 
 /** 组件 props（宽松面：owner 股 close + inject 股展开）。 */
@@ -90,7 +93,11 @@ export const SecuritySection: FC<SecuritySectionProps> = (props) => {
           ? <PolicyBlock t={t} api={props.policy} />
           : null}
       </Section>
-      <Section title={t('auditTitle')} />
+      <Section title={t('auditTitle')}>
+        {props.audit !== undefined
+          ? <AuditBlock t={t} api={props.audit} />
+          : null}
+      </Section>
     </div>
   )
 }

@@ -106,7 +106,7 @@ export const PolicyBlock: FC<PolicyBlockProps> = ({ t, api }) => {
   return (
     <div data-block="policy" data-state={state}>
       <label>
-        <span>{t('passwordLogin')}</span>
+        <span>{t('fieldPasswordLogin')}</span>
         <input
           data-field="passwordLogin"
           type="checkbox"
@@ -115,7 +115,7 @@ export const PolicyBlock: FC<PolicyBlockProps> = ({ t, api }) => {
         />
       </label>
       <label>
-        <span>{t('passkeyLogin')}</span>
+        <span>{t('fieldPasskeyLogin')}</span>
         <input
           data-field="passkeyLogin"
           type="checkbox"
@@ -124,7 +124,7 @@ export const PolicyBlock: FC<PolicyBlockProps> = ({ t, api }) => {
         />
       </label>
       <label>
-        <span>{t('auditEnabled')}</span>
+        <span>{t('fieldAuditEnabled')}</span>
         <input
           data-field="auditEnabled"
           type="checkbox"
@@ -133,7 +133,7 @@ export const PolicyBlock: FC<PolicyBlockProps> = ({ t, api }) => {
         />
       </label>
       <label>
-        <span>{t('sessionTtlMinutes')}</span>
+        <span>{t('fieldSessionTtl')}</span>
         <Input
           data-field="sessionTtlMinutes"
           value={String(draft.sessionTtlMinutes)}
@@ -142,7 +142,7 @@ export const PolicyBlock: FC<PolicyBlockProps> = ({ t, api }) => {
         />
       </label>
       <label>
-        <span>{t('maxLoginAttempts')}</span>
+        <span>{t('fieldMaxAttempts')}</span>
         <Input
           data-field="maxLoginAttempts"
           value={String(draft.maxLoginAttempts)}
@@ -151,7 +151,7 @@ export const PolicyBlock: FC<PolicyBlockProps> = ({ t, api }) => {
         />
       </label>
       <label>
-        <span>{t('rateLimitWindowMinutes')}</span>
+        <span>{t('fieldRateWindow')}</span>
         <Input
           data-field="rateLimitWindowMinutes"
           value={String(draft.rateLimitWindowMinutes)}

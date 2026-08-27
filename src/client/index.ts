@@ -85,6 +85,10 @@ export function apply(ctx: Context): void {
         writeSettings: (partial: Partial<import('./settings/PolicyBlock').SecuritySettingsView>) =>
           securityMethod(ctx, 'settingsWrite')(partial) as Promise<{ ok: true; value: import('./settings/PolicyBlock').SecuritySettingsView } | { ok: false; error: { code: string; message: string } }>,
       },
+      audit: {
+        readAudit: (offset: number, limit: number) =>
+          securityMethod(ctx, 'auditRead')({ offset, limit }) as Promise<{ events: readonly { kind: string; at: number; actor: string; ip?: string; detail?: string }[]; hasMore: boolean }>,
+      },
     }),
   }, SecuritySection as never))
 }
