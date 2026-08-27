@@ -27,6 +27,17 @@ function primStub(tag: string): FC<{ children?: ReactNode; [key: string]: unknow
   }
 }
 
+/** Input stub：遵守宿主 Input 契约——onChange(value: string)，从原生事件适配。 */
+function InputStub(props: { value?: string; onChange?: (value: string) => void; [key: string]: unknown }): ReactNode {
+  const { children, onChange, ...rest } = props
+  void children
+  return h('input', {
+    ...rest as Record<string, string>,
+    value: props.value ?? '',
+    onChange: (event: { target: { value: string } }) => onChange?.(event.target.value),
+  })
+}
+
 /** 极小 createElement（避免依赖 jsx 转换细节）。 */
 function h(tag: string, props: Record<string, unknown> | null, ...children: ReactNode[]): ReactNode {
   return { $$typeof: Symbol.for('react.transitional.element'), type: tag, key: null, props: { ...props, children: children.length === 0 ? undefined : children.length === 1 ? children[0] : children } } as ReactNode
@@ -56,7 +67,7 @@ function loadBundle(): {
     '@deepseek-ai/dsh-client-ui-slots': {},
     '@deepseek-ai/dsh-client-ui-primitives': {
       Button: primStub('button'),
-      Input: primStub('input'),
+      Input: InputStub as unknown as FC<never>,
       Pill: primStub('span'),
       DisclosureRow: primStub('div'),
       RiskConfirmation: primStub('div'),
@@ -83,17 +94,44 @@ const ZH = {
   passkeyTitle: '通行密钥',
   policyTitle: '安全策略',
   auditTitle: '审计日志',
+  username: '用户名',
+  password: '密码',
+  create: '创建账号',
+  loadFailed: '加载失败',
+}
+
+/** en 词典（Story 2b 断言字面量）。 */
+const EN = {
+  page: 'Security',
+  bannerTitle: 'Deployment warnings',
+  statusLoadFailed: 'Failed to load status',
+  accountsTitle: 'Accounts',
+  passkeyTitle: 'Passkeys',
+  policyTitle: 'Security policy',
+  auditTitle: 'Audit log',
+  username: 'Username',
+  password: 'Password',
+  create: 'Create account',
+  loadFailed: 'Load failed',
+}
+
+/** 设置受控 input 的值并派发 input 事件（React 兼容路径）。 */
+function setInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+  setter?.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
 /** 构造 stub client ctx。 */
-function makeCtx(overrides: { remoteSecurity?: Record<string, unknown> } = {}) {
+function makeCtx(overrides: { remoteSecurity?: Record<string, unknown>; locale?: 'zh' | 'en' } = {}) {
+  const dict: Record<string, string> = overrides.locale === 'en' ? EN : ZH
   const slotFactories = new Map<string, () => unknown>()
   const registerCalls: { options: { name: string; id?: string; order?: number; inject?: () => Record<string, unknown> }; component: unknown }[] = []
   const ctx = {
     effect: vi.fn((cb: () => unknown) => { const d = cb(); return typeof d === 'function' ? d : undefined }),
     locale: {
-      register: vi.fn(() => () => {}),
-      bind: vi.fn((ns: string) => (key: string) => (ns === 'settings.security' ? ZH[key as keyof typeof ZH] ?? key : key)),
+      register: vi.fn<(ns: string, dicts: { zh: Record<string, string>; en: Record<string, string> }) => () => void>(() => () => {}),
+      bind: vi.fn((ns: string) => (key: string) => (ns === 'settings.security' ? dict[key] ?? key : key)),
     },
     slots: {
       inject: vi.fn((name: string, factory: () => unknown) => { slotFactories.set(name, factory) }),
@@ -219,5 +257,114 @@ describe('Story 2a：诊断横幅（remote 接线）', () => {
     expect(ctx.remote.$mount).toHaveBeenCalled()
     const contribution = (ctx.remote.$mount.mock.calls[0]?.[0]) as { namespace?: string }
     expect(contribution?.namespace).toBe('security')
+  })
+})
+
+describe('Story 2b：locale 切换', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('en 词典 → 区块标题为英文', async () => {
+    const { ctx, slotFactories, registerCalls } = makeCtx({ locale: 'en' })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const text = container.textContent ?? ''
+    expect(text).toContain('Accounts')
+    expect(text).toContain('Audit log')
+    container.remove()
+  })
+
+  it('实现词典：en 与 zh key 集一致（防漏译守护）', () => {
+    const { ctx } = makeCtx()
+    bundle.exports.apply(ctx)
+    const call = ctx.locale.register.mock.calls[0]
+    const dicts = call?.[1] as { zh: Record<string, string>; en: Record<string, string> }
+    expect(Object.keys(dicts.en).sort()).toEqual(Object.keys(dicts.zh).sort())
+  })
+})
+
+describe('Story 3：账号管理', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('初始渲染：accountsList 调用 + 列表显示用户名', async () => {
+    const accountsList = vi.fn(async () => [
+      { username: 'admin', hasPasskey: false, createdAt: 1700000000000 },
+    ])
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    expect(accountsList).toHaveBeenCalledWith({})
+    expect(container.textContent ?? '').toContain('admin')
+    container.remove()
+  })
+
+  it('创建账号：填表提交 → accountCreate 参数正确 + 列表刷新出现新账号', async () => {
+    let accounts = [{ username: 'admin', hasPasskey: false, createdAt: 1 }]
+    const accountsList = vi.fn(async () => accounts)
+    const accountCreate = vi.fn(async (request: { username: string; password: string }) => {
+      accounts = [...accounts, { username: request.username, hasPasskey: false, createdAt: 2 }]
+      return { ok: true, value: undefined }
+    })
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList, accountCreate },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const block = container.querySelector('[data-block="accounts"]')
+    expect(block).not.toBeNull()
+    const inputs = Array.from(block?.querySelectorAll('input') ?? []) as HTMLInputElement[]
+    expect(inputs.length).toBeGreaterThanOrEqual(2)
+    await act(async () => {
+      setInputValue(inputs[0] as HTMLInputElement, 'newuser')
+    })
+    await act(async () => {
+      setInputValue(inputs[1] as HTMLInputElement, 'SecurePass123!')
+    })
+    const btn = container.querySelector<HTMLButtonElement>('button[data-action="account-create"]')
+    expect(btn).not.toBeNull()
+    expect(btn?.disabled).toBe(false)
+    await act(async () => {
+      btn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(accountCreate).toHaveBeenCalledWith({ username: 'newuser', password: 'SecurePass123!' })
+    expect(container.textContent ?? '').toContain('newuser')
+    container.remove()
+  })
+
+  it('创建失败：host 错误信息呈现于表单', async () => {
+    const accountsList = vi.fn(async () => [])
+    const accountCreate = vi.fn(async () => ({ ok: false, error: { code: 'create-failed', message: '密码强度不足：至少 12 字符' } }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList, accountCreate },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const inputs = Array.from(container.querySelectorAll('[data-block="accounts"] input')) as HTMLInputElement[]
+    await act(async () => { setInputValue(inputs[0] as HTMLInputElement, 'x') })
+    await act(async () => { setInputValue(inputs[1] as HTMLInputElement, 'y') })
+    const btn = container.querySelector<HTMLButtonElement>('button[data-action="account-create"]')
+    await act(async () => { btn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(container.textContent ?? '').toContain('密码强度不足：至少 12 字符')
+    container.remove()
+  })
+
+  it('账号加载失败：区块错误态呈现', async () => {
+    const accountsList = vi.fn(async () => { throw new Error('网络断') })
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const block = container.querySelector('[data-block="accounts"]')
+    expect(block?.getAttribute('data-state')).toBe('error')
+    expect(block?.textContent ?? '').toContain('加载失败')
+    container.remove()
   })
 })

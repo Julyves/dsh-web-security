@@ -9,6 +9,10 @@ export type SecurityLocaleKey =
   | 'bannerTitle'
   | 'statusLoadFailed'
   | 'accountsTitle'
+  | 'username'
+  | 'password'
+  | 'create'
+  | 'loadFailed'
   | 'passkeyTitle'
   | 'policyTitle'
   | 'auditTitle'
@@ -18,6 +22,10 @@ export const zh: Record<SecurityLocaleKey, string> = {
   bannerTitle: '部署警告',
   statusLoadFailed: '状态加载失败',
   accountsTitle: '账号管理',
+  username: '用户名',
+  password: '密码',
+  create: '创建账号',
+  loadFailed: '加载失败',
   passkeyTitle: '通行密钥',
   policyTitle: '安全策略',
   auditTitle: '审计日志',
@@ -28,6 +36,10 @@ export const en: Record<SecurityLocaleKey, string> = {
   bannerTitle: 'Deployment warnings',
   statusLoadFailed: 'Failed to load status',
   accountsTitle: 'Accounts',
+  username: 'Username',
+  password: 'Password',
+  create: 'Create account',
+  loadFailed: 'Load failed',
   passkeyTitle: 'Passkeys',
   policyTitle: 'Security policy',
   auditTitle: 'Audit log',

@@ -11,8 +11,21 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { SecuritySection, type SecurityStatusView } from './settings/SecuritySection.tsx'
+import type { AccountSummaryView } from './settings/AccountsBlock.tsx'
 import { securityRemoteContribution } from './remote'
 import { zh, en } from './locales'
+
+/** remote.security 的动态代理视图（挂载后可调；消费点在 inject 闭包）。 */
+function securityRemote(ctx: Context): Record<string, (request: unknown) => Promise<unknown>> {
+  return (ctx.remote as unknown as { security: Record<string, (request: unknown) => Promise<unknown>> }).security
+}
+
+/** 取命名空间方法（缺失时抛错——$mount 未完成即调用属编程错误，大声失败）。 */
+function securityMethod(ctx: Context, method: string): (request: unknown) => Promise<unknown> {
+  const fn = securityRemote(ctx)[method]
+  if (fn === undefined) throw new Error(`web-security: remote.security.${method} 不可用（贡献未挂载）`)
+  return fn
+}
 
 /** Cordis 插件约定：声明需要的服务。 */
 export const inject = ['slots', 'remote', 'locale'] as const
@@ -46,6 +59,11 @@ export function apply(ctx: Context): void {
       loadStatus: async (): Promise<SecurityStatusView> => {
         const remote = (ctx.remote as unknown as { security: { status: (request: unknown) => Promise<SecurityStatusView> } }).security
         return remote.status({})
+      },
+      accounts: {
+        loadAccounts: async () => securityMethod(ctx, 'accountsList')({}) as Promise<readonly AccountSummaryView[]>,
+        createAccount: (username: string, password: string) =>
+          securityMethod(ctx, 'accountCreate')({ username, password }) as Promise<{ ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }>,
       },
     }),
   }, SecuritySection as never))
