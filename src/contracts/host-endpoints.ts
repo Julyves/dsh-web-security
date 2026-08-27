@@ -10,9 +10,13 @@
 import type { AuthEvent, LoginGate } from './auth-events'
 import type { SecuritySettings } from './settings'
 
-/** RPC 信封：传输层结果（ok/error）包裹业务返回值。 */
+/** RPC 信封：传输层结果（ok/error）包裹业务返回值。
+ *
+ * wire 契约（实机验证发现）：T=void 的 ok 分支**不得**携带 value 字段——
+ * 宿主 gateway 对业务结果做 JSON 边界校验，显式 undefined 属性值被拒绝
+ * （"business result failed boundary validation"）。 */
 export type RemoteEnvelope<T> =
-  | { readonly ok: true; readonly value: T }
+  | { readonly ok: true; readonly value?: T }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
 /** 状态诊断视图：登录页与设置界面共用。 */
@@ -264,7 +268,7 @@ export function createHostSecurityEndpoints(
       try {
         await deps.createAccount(request.username, request.password)
         deps.recordEvent({ kind: 'account-created', at: Date.now(), actor: request.username })
-        return { ok: true, value: undefined }
+        return { ok: true }
       } catch (error) {
         return { ok: false, error: { code: 'create-failed', message: error instanceof Error ? error.message : String(error) } }
       }
@@ -274,7 +278,7 @@ export function createHostSecurityEndpoints(
       try {
         await deps.updatePassword(request.username, request.currentPassword, request.newPassword)
         deps.recordEvent({ kind: 'password-changed', at: Date.now(), actor: request.username })
-        return { ok: true, value: undefined }
+        return { ok: true }
       } catch (error) {
         return { ok: false, error: { code: 'update-failed', message: error instanceof Error ? error.message : String(error) } }
       }
@@ -287,7 +291,7 @@ export function createHostSecurityEndpoints(
         // 会话联动（M4）：被删账号的活跃会话立即失效（防已登录被删用户继续操作）。
         deps.revokeSessionsForUser(request.username)
         deps.recordEvent({ kind: 'session-expired', at: Date.now(), actor: request.username, detail: '账号删除，会话全部撤销' })
-        return { ok: true, value: undefined }
+        return { ok: true }
       } catch (error) {
         return { ok: false, error: { code: 'remove-failed', message: error instanceof Error ? error.message : String(error) } }
       }
@@ -360,7 +364,7 @@ export function createHostSecurityEndpoints(
         return { ok: false, error: { code: 'passkey-not-found', message: `passkey ${request.credentialId.slice(0, 8)} 不存在（可能已被移除）` } }
       }
       deps.recordEvent({ kind: 'passkey-removed', at: Date.now(), actor: request.username, detail: `credentialId=${request.credentialId.slice(0, 8)}` })
-      return { ok: true, value: undefined }
+      return { ok: true }
     },
 
     async listPasskeys(request: ListPasskeysRequest): Promise<readonly PasskeySummary[]> {

@@ -146,7 +146,7 @@ export function createWebAuthnService(deps: {
       }
       await deps.addPasskey(username, passkey)
       deps.recordEvent({ kind: 'passkey-registered', at: Date.now(), actor: username, detail: passkey.credentialId.slice(0, 8) })
-      return { ok: true, value: undefined }
+      return { ok: true }
     } catch (error) {
       return { ok: false, error: { code: 'register-error', message: error instanceof Error ? error.message : String(error) } }
     }

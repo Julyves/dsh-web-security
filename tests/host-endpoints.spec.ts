@@ -98,6 +98,19 @@ describe('passkeyRemove 端点（M4）', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('wire 契约：Envelope<void> 的 ok 分支不得携带 value 字段（实机 gateway JSON 边界校验拒绝 undefined）', async () => {
+    const deps = makeDeps({
+      listPasskeys: async () => [{ credentialId: CRED_A }],
+      removePasskey: async () => true,
+    })
+    const endpoints = createHostSecurityEndpoints(deps)
+    const removed = await endpoints.passkeyRemove({ username: 'admin', credentialId: CRED_A })
+    expect(removed.ok).toBe(true)
+    expect('value' in removed).toBe(false)
+    const createResult = await endpoints.accountCreate({ username: 'admin', password: 'SecurePass123!' })
+    if (createResult.ok) expect('value' in createResult).toBe(false)
+  })
+
   it('移除成功：审计事件 kind=passkey-removed、actor=用户名', async () => {
     const events: AuthEvent[] = []
     const deps = makeDeps({

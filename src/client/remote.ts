@@ -76,7 +76,8 @@ export const securitySettingsSchema = z.object({
 })
 
 export const remoteEnvelopeVoidSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), value: z.undefined() }),
+  // ok 分支不带 value 字段（host wire 契约：undefined 属性被 gateway JSON 边界校验拒绝）。
+  z.object({ ok: z.literal(true) }),
   z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
 ])
 
