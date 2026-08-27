@@ -1,13 +1,13 @@
 /**
- * 账号管理区块：列表 + 创建表单。
+ * 账号管理区块：列表 + 创建表单 + 行内改密 + 删除（RiskConfirmation）。
  *
- * 数据经注入面回调（loadAccounts/createAccount——宿主 client 规范：
- * live data 走 inject，组件零订阅机械）。错误态呈现 host 返回的可读
- * message（强度/字符集校验在 host——单一权威源）。
+ * 数据经注入面回调（loadAccounts/createAccount/updatePassword/removeAccount
+ * ——宿主 client 规范：live data 走 inject，组件零订阅机械）。错误态呈现
+ * host 返回的可读 message（强度/字符集/自锁死校验在 host——单一权威源）。
  */
 import { useEffect, useState } from 'react'
 import type { FC, ReactNode } from 'react'
-import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, Pill, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** 账号摘要视图（AccountSummary 镜像）。 */
 export interface AccountSummaryView {
@@ -23,12 +23,82 @@ export type Envelope<T> = { ok: true; value: T } | { ok: false; error: { code: s
 export interface AccountsApi {
   loadAccounts(): Promise<readonly AccountSummaryView[]>
   createAccount(username: string, password: string): Promise<Envelope<void>>
+  updatePassword(username: string, currentPassword: string, newPassword: string): Promise<Envelope<void>>
+  removeAccount(username: string): Promise<Envelope<void>>
 }
 
 /** 账号区块 props。 */
 export interface AccountsBlockProps {
   t: (key: string) => string
   api: AccountsApi
+}
+
+/** 单账号行：用户名 + 改密/删除入口 + 行内改密表单。 */
+function AccountRow({ account, t, api, onRemoved }: {
+  account: AccountSummaryView
+  t: (key: string) => string
+  api: AccountsApi
+  onRemoved: (username: string) => void
+}): ReactNode {
+  const [editing, setEditing] = useState(false)
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [rowError, setRowError] = useState<string | undefined>(undefined)
+  const [updated, setUpdated] = useState(false)
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
+
+  async function submitPassword(): Promise<void> {
+    const result = await api.updatePassword(account.username, current, next)
+    if (result.ok) {
+      setEditing(false)
+      setCurrent('')
+      setNext('')
+      setRowError(undefined)
+      setUpdated(true)
+    } else {
+      setRowError(result.error.message)
+    }
+  }
+
+  async function submitRemove(): Promise<void> {
+    const result = await api.removeAccount(account.username)
+    setConfirmingRemove(false)
+    if (result.ok) onRemoved(account.username)
+    else setRowError(result.error.message)
+  }
+
+  return (
+    <li data-account={account.username}>
+      <span>{account.username}</span>
+      {account.hasPasskey ? <Pill>{t('hasPasskey')}</Pill> : null}
+      <Button data-action="password-open" data-username={account.username} onClick={() => { setEditing(!editing); setUpdated(false); setRowError(undefined) }}>
+        {t('changePassword')}
+      </Button>
+      <Button data-action="remove-open" data-username={account.username} onClick={() => { setConfirmingRemove(true); setRowError(undefined) }}>
+        {t('removeAccount')}
+      </Button>
+      {updated ? <span data-updated="">{t('passwordUpdated')}</span> : null}
+      {editing
+        ? (
+            <form data-role="password-edit" data-username={account.username} onSubmit={(e) => { e.preventDefault(); void submitPassword() }}>
+              <Input value={current} onChange={setCurrent} type="password" placeholder={t('currentPassword')} autoComplete="current-password" />
+              <Input value={next} onChange={setNext} type="password" placeholder={t('newPassword')} autoComplete="new-password" />
+              <Button data-action="password-submit" disabled={current === '' || next === ''} onClick={() => { void submitPassword() }}>
+                {t('submit')}
+              </Button>
+            </form>
+          )
+        : null}
+      {confirmingRemove
+        ? (
+            <RiskConfirmation confirm={() => { void submitRemove() }} cancel={() => setConfirmingRemove(false)}>
+              {t('confirmRemove')}
+            </RiskConfirmation>
+          )
+        : null}
+      {rowError !== undefined && !confirmingRemove ? <p data-row-error="">{rowError}</p> : null}
+    </li>
+  )
 }
 
 /** 账号管理区块组件。 */
@@ -66,26 +136,35 @@ export const AccountsBlock: FC<AccountsBlockProps> = ({ t, api }) => {
   }
 
   return (
-    <section data-section="" data-block="accounts" data-state={state}>
-      <h3>{t('accountsTitle')}</h3>
-      {state === 'error'
-        ? <p data-error="">{t('loadFailed')}</p>
-        : state === 'ready'
-          ? (
-              <ul>
-                {accounts.map((a) => <li key={a.username}>{a.username}</li>)}
-              </ul>
-            )
-          : null}
-      <form data-role="account-create" onSubmit={(e) => { e.preventDefault(); void submit() }}>
-        <Input value={username} onChange={setUsername} placeholder={t('username')} autoComplete="username" />
-        <Input value={password} onChange={setPassword} type="password" placeholder={t('password')} autoComplete="new-password" />
-        {formError !== undefined ? <p data-form-error="">{formError}</p> : null}
-        <Button data-action="account-create" disabled={creating || username === '' || password === ''} onClick={() => { void submit() }}>
-          {t('create')}
-        </Button>
-      </form>
-    </section>
+    <div>
+      <section data-block="accounts" data-state={state}>
+        {state === 'error'
+          ? <p data-error="">{t('loadFailed')}</p>
+          : state === 'ready'
+            ? (
+                <ul>
+                  {accounts.map((a) => (
+                    <AccountRow
+                      key={a.username}
+                      account={a}
+                      t={t}
+                      api={api}
+                      onRemoved={(u) => { setAccounts(accounts.filter(x => x.username !== u)) }}
+                    />
+                  ))}
+                </ul>
+              )
+            : null}
+        <form data-role="account-create" onSubmit={(e) => { e.preventDefault(); void submit() }}>
+          <Input value={username} onChange={setUsername} placeholder={t('username')} autoComplete="username" />
+          <Input value={password} onChange={setPassword} type="password" placeholder={t('password')} autoComplete="new-password" />
+          {formError !== undefined ? <p data-form-error="">{formError}</p> : null}
+          <Button data-action="account-create" disabled={creating || username === '' || password === ''} onClick={() => { void submit() }}>
+            {t('create')}
+          </Button>
+        </form>
+      </section>
+    </div>
   )
 }
 

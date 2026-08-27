@@ -38,6 +38,16 @@ function InputStub(props: { value?: string; onChange?: (value: string) => void; 
   })
 }
 
+/** RiskConfirmation stub：渲染确认/取消按钮（data-action 断言面），遵守 {confirm, cancel} 契约。 */
+function RiskConfirmationStub(props: { children?: ReactNode; confirm?: () => void; cancel?: () => void; [key: string]: unknown }): ReactNode {
+  const { children, confirm, cancel } = props
+  return h('div', { 'data-prim': 'risk' },
+    children,
+    h('button', { 'data-action': 'risk-confirm', onClick: () => confirm?.() }, '确认'),
+    h('button', { 'data-action': 'risk-cancel', onClick: () => cancel?.() }, '取消'),
+  )
+}
+
 /** 极小 createElement（避免依赖 jsx 转换细节）。 */
 function h(tag: string, props: Record<string, unknown> | null, ...children: ReactNode[]): ReactNode {
   return { $$typeof: Symbol.for('react.transitional.element'), type: tag, key: null, props: { ...props, children: children.length === 0 ? undefined : children.length === 1 ? children[0] : children } } as ReactNode
@@ -70,7 +80,7 @@ function loadBundle(): {
       Input: InputStub as unknown as FC<never>,
       Pill: primStub('span'),
       DisclosureRow: primStub('div'),
-      RiskConfirmation: primStub('div'),
+      RiskConfirmation: RiskConfirmationStub as unknown as FC<never>,
     },
   }
   // eval bundle 源码（闭包捕获 window.__ModuleLoader__ 与 var module）。
@@ -86,33 +96,49 @@ function loadBundle(): {
 }
 
 /** zh 词典（与实现 locales 对齐的断言字面量）。 */
-const ZH = {
+const ZH: Record<string, string> = {
   page: '安全',
   bannerTitle: '部署警告',
   statusLoadFailed: '状态加载失败',
   accountsTitle: '账号管理',
-  passkeyTitle: '通行密钥',
-  policyTitle: '安全策略',
-  auditTitle: '审计日志',
   username: '用户名',
   password: '密码',
   create: '创建账号',
   loadFailed: '加载失败',
+  hasPasskey: '通行密钥',
+  changePassword: '改密',
+  currentPassword: '当前密码',
+  newPassword: '新密码',
+  submit: '提交',
+  passwordUpdated: '已更新',
+  removeAccount: '删除账号',
+  confirmRemove: '确认删除该账号？其活跃会话将被撤销。',
+  passkeyTitle: '通行密钥',
+  policyTitle: '安全策略',
+  auditTitle: '审计日志',
 }
 
 /** en 词典（Story 2b 断言字面量）。 */
-const EN = {
+const EN: Record<string, string> = {
   page: 'Security',
   bannerTitle: 'Deployment warnings',
   statusLoadFailed: 'Failed to load status',
   accountsTitle: 'Accounts',
-  passkeyTitle: 'Passkeys',
-  policyTitle: 'Security policy',
-  auditTitle: 'Audit log',
   username: 'Username',
   password: 'Password',
   create: 'Create account',
   loadFailed: 'Load failed',
+  hasPasskey: 'Passkey',
+  changePassword: 'Change password',
+  currentPassword: 'Current password',
+  newPassword: 'New password',
+  submit: 'Submit',
+  passwordUpdated: 'Updated',
+  removeAccount: 'Remove account',
+  confirmRemove: 'Remove this account? Its active sessions will be revoked.',
+  passkeyTitle: 'Passkeys',
+  policyTitle: 'Security policy',
+  auditTitle: 'Audit log',
 }
 
 /** 设置受控 input 的值并派发 input 事件（React 兼容路径）。 */
@@ -142,7 +168,7 @@ function makeCtx(overrides: { remoteSecurity?: Record<string, unknown>; locale?:
     },
     remote: {
       $mount: vi.fn<(contribution: unknown) => Promise<() => void>>(async () => () => {}),
-      security: overrides.remoteSecurity ?? {},
+      security: { status: async () => ({ enabled: true, diagnostics: [] }), ...(overrides.remoteSecurity ?? {}) },
     },
   }
   return { ctx, slotFactories, registerCalls }
@@ -365,6 +391,132 @@ describe('Story 3：账号管理', () => {
     const block = container.querySelector('[data-block="accounts"]')
     expect(block?.getAttribute('data-state')).toBe('error')
     expect(block?.textContent ?? '').toContain('加载失败')
+    container.remove()
+  })
+})
+
+describe('Story 4：修改密码', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('行内改密表单提交 → accountUpdatePassword 参数正确 + 成功提示', async () => {
+    const accountsList = vi.fn(async () => [
+      { username: 'admin', hasPasskey: false, createdAt: 1 },
+    ])
+    const accountUpdatePassword = vi.fn(async () => ({ ok: true, value: undefined }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList, accountUpdatePassword },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    // 打开 admin 行的改密表单。
+    const openBtn = container.querySelector<HTMLButtonElement>('button[data-action="password-open"][data-username="admin"]')
+    expect(openBtn).not.toBeNull()
+    await act(async () => { openBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const form = container.querySelector('[data-role="password-edit"][data-username="admin"]')
+    expect(form).not.toBeNull()
+    const inputs = Array.from(form?.querySelectorAll('input') ?? []) as HTMLInputElement[]
+    await act(async () => { setInputValue(inputs[0] as HTMLInputElement, 'OldPass123!') })
+    await act(async () => { setInputValue(inputs[1] as HTMLInputElement, 'NewPass456!') })
+    const submit = form?.querySelector<HTMLButtonElement>('button[data-action="password-submit"]')
+    await act(async () => { submit?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(accountUpdatePassword).toHaveBeenCalledWith({
+      username: 'admin', currentPassword: 'OldPass123!', newPassword: 'NewPass456!',
+    })
+    expect(container.textContent ?? '').toContain('已更新')
+    container.remove()
+  })
+
+  it('旧密码错误 → host 错误信息呈现', async () => {
+    const accountsList = vi.fn(async () => [{ username: 'admin', hasPasskey: false, createdAt: 1 }])
+    const accountUpdatePassword = vi.fn(async () => ({ ok: false, error: { code: 'update-failed', message: '当前密码不正确' } }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList, accountUpdatePassword },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const openBtn = container.querySelector<HTMLButtonElement>('button[data-action="password-open"][data-username="admin"]')
+    await act(async () => { openBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const form = container.querySelector('[data-role="password-edit"][data-username="admin"]')
+    const inputs = Array.from(form?.querySelectorAll('input') ?? []) as HTMLInputElement[]
+    await act(async () => { setInputValue(inputs[0] as HTMLInputElement, 'WrongOld1!') })
+    await act(async () => { setInputValue(inputs[1] as HTMLInputElement, 'NewPass456!') })
+    const submit = form?.querySelector<HTMLButtonElement>('button[data-action="password-submit"]')
+    await act(async () => { submit?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(container.textContent ?? '').toContain('当前密码不正确')
+    container.remove()
+  })
+})
+
+describe('Story 5：删除账号（RiskConfirmation）', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('点删除 → 风险确认出现 → 确认 → accountRemove 调用 + 列表移除', async () => {
+    let accounts = [
+      { username: 'admin', hasPasskey: false, createdAt: 1 },
+      { username: 'temp', hasPasskey: false, createdAt: 2 },
+    ]
+    const accountsList = vi.fn(async () => accounts)
+    const accountRemove = vi.fn(async (request: { username: string }) => {
+      accounts = accounts.filter(a => a.username !== request.username)
+      return { ok: true, value: undefined }
+    })
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList, accountRemove },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const delBtn = container.querySelector<HTMLButtonElement>('button[data-action="remove-open"][data-username="temp"]')
+    expect(delBtn).not.toBeNull()
+    await act(async () => { delBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    // 风险确认容器出现（RiskConfirmation stub）。
+    const risk = container.querySelector('[data-prim="risk"]')
+    expect(risk).not.toBeNull()
+    const confirmBtn = risk?.querySelector<HTMLButtonElement>('button[data-action="risk-confirm"]')
+    await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(accountRemove).toHaveBeenCalledWith({ username: 'temp' })
+    const text = container.textContent ?? ''
+    expect(text).not.toContain('temp')
+    expect(text).toContain('admin')
+    container.remove()
+  })
+
+  it('取消确认 → accountRemove 不被调用', async () => {
+    const accountsList = vi.fn(async () => [{ username: 'admin', hasPasskey: false, createdAt: 1 }])
+    const accountRemove = vi.fn(async () => ({ ok: true, value: undefined }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList, accountRemove },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const delBtn = container.querySelector<HTMLButtonElement>('button[data-action="remove-open"][data-username="admin"]')
+    await act(async () => { delBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const cancelBtn = container.querySelector<HTMLButtonElement>('button[data-action="risk-cancel"]')
+    await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(accountRemove).not.toHaveBeenCalled()
+    expect(container.textContent ?? '').toContain('admin')
+    container.remove()
+  })
+
+  it('删除失败 → 错误呈现且账号保留', async () => {
+    const accountsList = vi.fn(async () => [{ username: 'admin', hasPasskey: false, createdAt: 1 }])
+    const accountRemove = vi.fn(async () => ({ ok: false, error: { code: 'remove-failed', message: '不能删除最后一个账号？' } }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { accountsList, accountRemove },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const delBtn = container.querySelector<HTMLButtonElement>('button[data-action="remove-open"][data-username="admin"]')
+    await act(async () => { delBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const confirmBtn = container.querySelector<HTMLButtonElement>('button[data-action="risk-confirm"]')
+    await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(container.textContent ?? '').toContain('不能删除最后一个账号？')
+    expect(container.textContent ?? '').toContain('admin')
     container.remove()
   })
 })

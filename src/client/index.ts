@@ -64,6 +64,10 @@ export function apply(ctx: Context): void {
         loadAccounts: async () => securityMethod(ctx, 'accountsList')({}) as Promise<readonly AccountSummaryView[]>,
         createAccount: (username: string, password: string) =>
           securityMethod(ctx, 'accountCreate')({ username, password }) as Promise<{ ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }>,
+        updatePassword: (username: string, currentPassword: string, newPassword: string) =>
+          securityMethod(ctx, 'accountUpdatePassword')({ username, currentPassword, newPassword }) as Promise<{ ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }>,
+        removeAccount: (username: string) =>
+          securityMethod(ctx, 'accountRemove')({ username }) as Promise<{ ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }>,
       },
     }),
   }, SecuritySection as never))

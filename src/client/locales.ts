@@ -13,6 +13,14 @@ export type SecurityLocaleKey =
   | 'password'
   | 'create'
   | 'loadFailed'
+  | 'hasPasskey'
+  | 'changePassword'
+  | 'currentPassword'
+  | 'newPassword'
+  | 'submit'
+  | 'passwordUpdated'
+  | 'removeAccount'
+  | 'confirmRemove'
   | 'passkeyTitle'
   | 'policyTitle'
   | 'auditTitle'
@@ -26,6 +34,14 @@ export const zh: Record<SecurityLocaleKey, string> = {
   password: '密码',
   create: '创建账号',
   loadFailed: '加载失败',
+  hasPasskey: '通行密钥',
+  changePassword: '改密',
+  currentPassword: '当前密码',
+  newPassword: '新密码',
+  submit: '提交',
+  passwordUpdated: '已更新',
+  removeAccount: '删除账号',
+  confirmRemove: '确认删除该账号？其活跃会话将被撤销。',
   passkeyTitle: '通行密钥',
   policyTitle: '安全策略',
   auditTitle: '审计日志',
@@ -40,6 +56,14 @@ export const en: Record<SecurityLocaleKey, string> = {
   password: 'Password',
   create: 'Create account',
   loadFailed: 'Load failed',
+  hasPasskey: 'Passkey',
+  changePassword: 'Change password',
+  currentPassword: 'Current password',
+  newPassword: 'New password',
+  submit: 'Submit',
+  passwordUpdated: 'Updated',
+  removeAccount: 'Remove account',
+  confirmRemove: 'Remove this account? Its active sessions will be revoked.',
   passkeyTitle: 'Passkeys',
   policyTitle: 'Security policy',
   auditTitle: 'Audit log',
