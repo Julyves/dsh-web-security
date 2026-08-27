@@ -10,7 +10,8 @@
  * 主 fiber inject 不声明 remote.security（防自挂载服务死锁——指南 7.2）。
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { SecuritySection } from './settings/SecuritySection.tsx'
+import { SecuritySection, type SecurityStatusView } from './settings/SecuritySection.tsx'
+import { securityRemoteContribution } from './remote'
 import { zh, en } from './locales'
 
 /** Cordis 插件约定：声明需要的服务。 */
@@ -22,9 +23,15 @@ export const name = 'dsh-web-security'
 /** 词典命名空间。 */
 const NS = 'settings.security'
 
-/** Cordis 插件入口：注册词典 + 设置页槽位贡献。 */
+/** Cordis 插件入口：注册词典 + remote 贡献 + 设置页槽位贡献。 */
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'web-security: dictionaries')
+
+  // remote 贡献挂载（fire-and-forget；消费在组件 inject 闭包经
+  // ctx.remote.security 动态代理——不经主 fiber inject 静态等待，防死锁）。
+  void ctx.remote.$mount(securityRemoteContribution).then((dispose) => {
+    ctx.effect(() => dispose, 'web-security: remote contribution')
+  })
 
   const t = ctx.locale.bind(NS)
 
@@ -34,6 +41,12 @@ export function apply(ctx: Context): void {
     order: 100,
     label: () => t('page'),
     locale: NS,
-    inject: () => ({ t }),
+    inject: () => ({
+      t,
+      loadStatus: async (): Promise<SecurityStatusView> => {
+        const remote = (ctx.remote as unknown as { security: { status: (request: unknown) => Promise<SecurityStatusView> } }).security
+        return remote.status({})
+      },
+    }),
   }, SecuritySection as never))
 }

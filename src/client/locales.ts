@@ -7,6 +7,7 @@
 export type SecurityLocaleKey =
   | 'page'
   | 'bannerTitle'
+  | 'statusLoadFailed'
   | 'accountsTitle'
   | 'passkeyTitle'
   | 'policyTitle'
@@ -15,6 +16,7 @@ export type SecurityLocaleKey =
 export const zh: Record<SecurityLocaleKey, string> = {
   page: '安全',
   bannerTitle: '部署警告',
+  statusLoadFailed: '状态加载失败',
   accountsTitle: '账号管理',
   passkeyTitle: '通行密钥',
   policyTitle: '安全策略',
@@ -24,6 +26,7 @@ export const zh: Record<SecurityLocaleKey, string> = {
 export const en: Record<SecurityLocaleKey, string> = {
   page: 'Security',
   bannerTitle: 'Deployment warnings',
+  statusLoadFailed: 'Failed to load status',
   accountsTitle: 'Accounts',
   passkeyTitle: 'Passkeys',
   policyTitle: 'Security policy',

@@ -78,6 +78,7 @@ function loadBundle(): {
 const ZH = {
   page: '安全',
   bannerTitle: '部署警告',
+  statusLoadFailed: '状态加载失败',
   accountsTitle: '账号管理',
   passkeyTitle: '通行密钥',
   policyTitle: '安全策略',
@@ -85,9 +86,9 @@ const ZH = {
 }
 
 /** 构造 stub client ctx。 */
-function makeCtx() {
+function makeCtx(overrides: { remoteSecurity?: Record<string, unknown> } = {}) {
   const slotFactories = new Map<string, () => unknown>()
-  const registerCalls: { options: { name: string; id?: string; order?: number }; component: unknown }[] = []
+  const registerCalls: { options: { name: string; id?: string; order?: number; inject?: () => Record<string, unknown> }; component: unknown }[] = []
   const ctx = {
     effect: vi.fn((cb: () => unknown) => { const d = cb(); return typeof d === 'function' ? d : undefined }),
     locale: {
@@ -96,14 +97,31 @@ function makeCtx() {
     },
     slots: {
       inject: vi.fn((name: string, factory: () => unknown) => { slotFactories.set(name, factory) }),
-      register: vi.fn((options: { name: string; id?: string; order?: number }, component: unknown) => {
+      register: vi.fn((options: { name: string; id?: string; order?: number; inject?: () => Record<string, unknown> }, component: unknown) => {
         registerCalls.push({ options, component })
         return () => {}
       }),
     },
-    remote: { $mount: vi.fn(async () => () => {}) },
+    remote: {
+      $mount: vi.fn<(contribution: unknown) => Promise<() => void>>(async () => () => {}),
+      security: overrides.remoteSecurity ?? {},
+    },
   }
   return { ctx, slotFactories, registerCalls }
+}
+
+/** 挂载并渲染设置页组件（四股合成：owner close + inject 面展开）。 */
+async function renderSection(ctx: ReturnType<typeof makeCtx>['ctx'], slotFactories: Map<string, () => unknown>, registerCalls: ReturnType<typeof makeCtx>['registerCalls']): Promise<HTMLDivElement> {
+  ;(slotFactories.get('settings.section') as () => unknown)()
+  const Component = registerCalls[0]?.component as FC<Record<string, unknown>>
+  const injectFace = (ctx.slots.register.mock.calls[0]?.[0] as { inject?: () => Record<string, unknown> }).inject?.() ?? {}
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  await act(async () => {
+    const root = ReactDOMClient.createRoot(container)
+    root.render({ $$typeof: Symbol.for('react.transitional.element'), type: Component, key: null, props: { close: () => {}, ...injectFace } } as never)
+  })
+  return container
 }
 
 describe('Story 1：设置页挂载（lib/client.js seam）', () => {
@@ -143,17 +161,7 @@ describe('Story 1：设置页挂载（lib/client.js seam）', () => {
   it('组件渲染：五区块标题可见（横幅/账号/通行密钥/策略/审计）', async () => {
     const { ctx, slotFactories, registerCalls } = makeCtx()
     bundle.exports.apply(ctx)
-    ;(slotFactories.get('settings.section') as () => unknown)()
-    const Component = registerCalls[0]?.component as FC<Record<string, unknown>>
-    expect(Component).toBeDefined()
-    // 模拟宿主 slot renderer 的四股合成：owner 股（close）+ inject 股展开。
-    const injectFace = (ctx.slots.register.mock.calls[0]?.[0] as { inject?: () => Record<string, unknown> }).inject?.() ?? {}
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    await act(async () => {
-      const root = ReactDOMClient.createRoot(container)
-      root.render({ $$typeof: Symbol.for('react.transitional.element'), type: Component, key: null, props: { close: () => {}, ...injectFace } } as never)
-    })
+    const container = await renderSection(ctx, slotFactories, registerCalls)
     const text = container.textContent ?? ''
     // 逐字面量断言（来自规格独立期望，非实现算法）。
     expect(text).toContain('账号管理')
@@ -161,5 +169,55 @@ describe('Story 1：设置页挂载（lib/client.js seam）', () => {
     expect(text).toContain('安全策略')
     expect(text).toContain('审计日志')
     container.remove()
+  })
+})
+
+describe('Story 2a：诊断横幅（remote 接线）', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('diagnostics 非空 → 红色横幅逐条渲染警告文本', async () => {
+    const warning = 'host-webserver 绑定 0.0.0.0:3080：LAN 设备可绕过认证门直连 3080 API（改绑 127.0.0.1）'
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { status: async () => ({ enabled: true, diagnostics: [warning] }) },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const text = container.textContent ?? ''
+    expect(text).toContain('部署警告')
+    expect(text).toContain(warning)
+    const banner = container.querySelector('[data-banner]')
+    expect(banner).not.toBeNull()
+    container.remove()
+  })
+
+  it('diagnostics 为空 → 无横幅区块', async () => {
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { status: async () => ({ enabled: true, diagnostics: [] }) },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    expect(container.querySelector('[data-banner]')).toBeNull()
+    container.remove()
+  })
+
+  it('status 调用失败 → 错误态提示而非崩溃', async () => {
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { status: async () => { throw new Error('网络断') } },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    expect(container.textContent ?? '').toContain('状态加载失败')
+    container.remove()
+  })
+
+  it('remote 贡献经 $mount 挂载（security 命名空间）', () => {
+    const { ctx } = makeCtx()
+    bundle.exports.apply(ctx)
+    expect(ctx.remote.$mount).toHaveBeenCalled()
+    const contribution = (ctx.remote.$mount.mock.calls[0]?.[0]) as { namespace?: string }
+    expect(contribution?.namespace).toBe('security')
   })
 })
