@@ -33,6 +33,7 @@ import type {
   StatusRequest, LogoutRequest, AccountsListRequest,
   PasskeyRegisterBeginRequest, PasskeyRegisterCompleteRequest,
   PasskeyLoginBeginRequest, PasskeyLoginCompleteRequest, PasskeyRemoveRequest,
+  ListPasskeysRequest, PasskeySummary,
 } from '../contracts/host-endpoints'
 import type { AuthEvent } from '../contracts/auth-events'
 
@@ -269,6 +270,12 @@ export class SecurityService extends TypertRemoteService {
   @Remote('passkeyRemove')
   async passkeyRemove(request: PasskeyRemoveRequest): Promise<RemoteEnvelope<void>> {
     return this.endpoints.passkeyRemove(request)
+  }
+
+  /** 列出某账号的 passkey 凭证（M4 设置页）。 */
+  @Remote('listPasskeys')
+  async listPasskeys(request: ListPasskeysRequest): Promise<readonly PasskeySummary[]> {
+    return this.endpoints.listPasskeys(request)
   }
 }
 

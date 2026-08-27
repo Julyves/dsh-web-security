@@ -99,6 +99,14 @@ export const passkeyRemoveRequestSchema = z.object({
   username: z.string(),
   credentialId: z.string(),
 })
+/** 列凭证请求（M4）。 */
+export const listPasskeysRequestSchema = z.object({
+  username: z.string(),
+})
+/** 凭证摘要（M4）。 */
+export const passkeySummarySchema = z.object({
+  credentialId: z.string(),
+})
 /** WebAuthn options（PublicKeyCredentialCreationOptionsJSON / RequestOptionsJSON 的宽松镜像——字段由浏览器端消费）。 */
 export const passkeyOptionsSchema = z.record(z.string(), z.unknown())
 
@@ -247,6 +255,14 @@ export const securityRemoteContribution = {
       invocation: { kind: 'direct' },
       parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#PasskeyRemoveRequest', schema: passkeyRemoveRequestSchema } }],
       result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#RemoteEnvelope<void>', schema: remoteEnvelopeVoidSchema },
+    },
+    // ── 列凭证（M4）──
+    {
+      id: 'dsh-web-security#security/listPasskeys',
+      service: 'security', namespace: 'security', method: 'listPasskeys',
+      invocation: { kind: 'direct' },
+      parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-web-security/types#ListPasskeysRequest', schema: listPasskeysRequestSchema } }],
+      result: { mode: 'strict', typeSymbol: 'dsh-web-security/types#PasskeySummary[]', schema: z.array(passkeySummarySchema) },
     },
   ],
 }

@@ -69,6 +69,17 @@ export function apply(ctx: Context): void {
         removeAccount: (username: string) =>
           securityMethod(ctx, 'accountRemove')({ username }) as Promise<{ ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }>,
       },
+      passkeys: {
+        loadAccounts: async () => securityMethod(ctx, 'accountsList')({}) as Promise<readonly AccountSummaryView[]>,
+        listPasskeys: (username: string) =>
+          securityMethod(ctx, 'listPasskeys')({ username }) as Promise<readonly { credentialId: string }[]>,
+        registerBegin: (username: string) =>
+          securityMethod(ctx, 'passkeyRegisterBegin')({ username }) as Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; error: { code: string; message: string } }>,
+        registerComplete: (username: string, credential: unknown) =>
+          securityMethod(ctx, 'passkeyRegisterComplete')({ username, credential }) as Promise<{ ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }>,
+        removePasskey: (username: string, credentialId: string) =>
+          securityMethod(ctx, 'passkeyRemove')({ username, credentialId }) as Promise<{ ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }>,
+      },
     }),
   }, SecuritySection as never))
 }

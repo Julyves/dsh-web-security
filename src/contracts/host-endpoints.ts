@@ -169,6 +169,18 @@ export interface SecurityEndpoints {
   passkeyLoginComplete(request: PasskeyLoginCompleteRequest): Promise<LoginResult>
   /** passkey 移除（已认证用户；M4）。 */
   passkeyRemove(request: PasskeyRemoveRequest): Promise<RemoteEnvelope<void>>
+  /** 列出某账号的 passkey 凭证（已认证用户；M4 设置页消费）。 */
+  listPasskeys(request: ListPasskeysRequest): Promise<readonly PasskeySummary[]>
+}
+
+/** 列凭证请求（M4）。 */
+export interface ListPasskeysRequest {
+  readonly username: string
+}
+
+/** 凭证摘要（绝不含公钥与 counter——仅标识）。 */
+export interface PasskeySummary {
+  readonly credentialId: string
 }
 
 /** passkey 注册开始请求。 */
@@ -349,6 +361,10 @@ export function createHostSecurityEndpoints(
       }
       deps.recordEvent({ kind: 'passkey-removed', at: Date.now(), actor: request.username, detail: `credentialId=${request.credentialId.slice(0, 8)}` })
       return { ok: true, value: undefined }
+    },
+
+    async listPasskeys(request: ListPasskeysRequest): Promise<readonly PasskeySummary[]> {
+      return deps.listPasskeys(request.username)
     },
   }
 }

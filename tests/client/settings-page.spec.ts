@@ -480,9 +480,9 @@ describe('Story 5：删除账号（RiskConfirmation）', () => {
     const confirmBtn = risk?.querySelector<HTMLButtonElement>('button[data-action="risk-confirm"]')
     await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(accountRemove).toHaveBeenCalledWith({ username: 'temp' })
-    const text = container.textContent ?? ''
-    expect(text).not.toContain('temp')
-    expect(text).toContain('admin')
+    const accountsText = container.querySelector('[data-block="accounts"]')?.textContent ?? ''
+    expect(accountsText).not.toContain('temp')
+    expect(accountsText).toContain('admin')
     container.remove()
   })
 
@@ -517,6 +517,118 @@ describe('Story 5：删除账号（RiskConfirmation）', () => {
     await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(container.textContent ?? '').toContain('不能删除最后一个账号？')
     expect(container.textContent ?? '').toContain('admin')
+    container.remove()
+  })
+})
+
+/** 构造 WebAuthn 可用环境（stub navigator.credentials + isSecureContext）。 */
+function enableWebAuthn(create: () => Promise<unknown>): void {
+  Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
+  Object.defineProperty(window.navigator, 'credentials', {
+    value: { create },
+    configurable: true,
+  })
+}
+
+/** 构造 stub 注册凭证（rawId/response 各字段为 ArrayBuffer，如浏览器真形态）。 */
+function fakeRegistrationCredential(): unknown {
+  const bytes = (s: string): ArrayBuffer => { const b = new Uint8Array([...s].map(c => c.charCodeAt(0))); return b.buffer }
+  return {
+    id: 'cred-1',
+    rawId: bytes('rawid'),
+    type: 'public-key',
+    clientExtensionResults: {},
+    response: { clientDataJSON: bytes('client'), attestationObject: bytes('attest') },
+  }
+}
+
+describe('Story 6/7/8：通行密钥管理', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('Story 6：选账号点注册 → begin + WebAuthn create + complete 全链调用', async () => {
+    const credentialsCreate = vi.fn(async () => fakeRegistrationCredential())
+    enableWebAuthn(credentialsCreate)
+    const passkeyRegisterBegin = vi.fn(async () => ({
+      ok: true,
+      value: { challenge: 'YWJj', rp: { name: 'dsh' }, user: { id: 'dXNlcg', name: 'admin', displayName: 'admin' }, pubKeyCredParams: [] },
+    }))
+    const passkeyRegisterComplete = vi.fn(async () => ({ ok: true, value: undefined }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: {
+        accountsList: vi.fn(async () => [{ username: 'admin', hasPasskey: false, createdAt: 1 }]),
+        passkeyRegisterBegin, passkeyRegisterComplete,
+      },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    // 选择账号。
+    const pick = container.querySelector<HTMLButtonElement>('button[data-action="passkey-account"][data-username="admin"]')
+    expect(pick).not.toBeNull()
+    await act(async () => { pick?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const registerBtn = container.querySelector<HTMLButtonElement>('button[data-action="passkey-register"]')
+    expect(registerBtn).not.toBeNull()
+    expect(registerBtn?.disabled).toBe(false)
+    await act(async () => { registerBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(passkeyRegisterBegin).toHaveBeenCalledWith({ username: 'admin' })
+    expect(credentialsCreate).toHaveBeenCalled()
+    expect(passkeyRegisterComplete).toHaveBeenCalledWith({
+      username: 'admin',
+      credential: expect.objectContaining({ rawId: expect.any(String), type: 'public-key' }),
+    })
+    container.remove()
+  })
+
+  it('Story 7：凭证列表 + 移除 → passkeyRemove 调用 + 列表刷新', async () => {
+    let creds = [{ credentialId: 'credAAAAAAAA' }, { credentialId: 'credBBBBBBBB' }]
+    const listPasskeysCall = vi.fn(async () => creds)
+    // remote 侧无独立 listPasskeys 端点——经 accountsList + passkey 面；此处 stub 命名空间方法。
+    const passkeyRemove = vi.fn(async () => {
+      creds = creds.filter(c => c.credentialId !== 'credAAAAAAAA')
+      return { ok: true, value: undefined }
+    })
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: {
+        accountsList: vi.fn(async () => [{ username: 'admin', hasPasskey: true, createdAt: 1 }]),
+        listPasskeys: listPasskeysCall,
+        passkeyRemove,
+      },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const pick = container.querySelector<HTMLButtonElement>('button[data-action="passkey-account"][data-username="admin"]')
+    await act(async () => { pick?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(listPasskeysCall).toHaveBeenCalledWith({ username: 'admin' })
+    expect(container.textContent ?? '').toContain('credAAAAAAAA')
+    const removeBtn = container.querySelector<HTMLButtonElement>('button[data-action="passkey-remove"][data-credential="credAAAAAAAA"]')
+    expect(removeBtn).not.toBeNull()
+    await act(async () => { removeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(passkeyRemove).toHaveBeenCalledWith({ username: 'admin', credentialId: 'credAAAAAAAA' })
+    expect(container.textContent ?? '').not.toContain('credAAAAAAAA')
+    expect(container.textContent ?? '').toContain('credBBBBBBBB')
+    container.remove()
+  })
+
+  it('Story 8：lockout-prevented → 自锁死解释文案呈现', async () => {
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: {
+        accountsList: vi.fn(async () => [{ username: 'admin', hasPasskey: true, createdAt: 1 }]),
+        listPasskeys: vi.fn(async () => [{ credentialId: 'lastCredAAAA' }]),
+        passkeyRemove: vi.fn(async () => ({
+          ok: false,
+          error: { code: 'lockout-prevented', message: '该账号仅剩此通行密钥且密码登录已关闭，移除后将无法登录（防自锁死）' },
+        })),
+      },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const pick = container.querySelector<HTMLButtonElement>('button[data-action="passkey-account"][data-username="admin"]')
+    await act(async () => { pick?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const removeBtn = container.querySelector<HTMLButtonElement>('button[data-action="passkey-remove"][data-credential="lastCredAAAA"]')
+    await act(async () => { removeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(container.textContent ?? '').toContain('防自锁死')
     container.remove()
   })
 })
