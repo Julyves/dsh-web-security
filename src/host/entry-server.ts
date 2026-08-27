@@ -131,7 +131,10 @@ passkeyBtn.addEventListener('click', async () => {
 
 function base64urlToBuffer(b64url) {
   const pad = '='.repeat((4 - b64url.length % 4) % 4);
-  const base64 = (b64url + pad).replace(/-/g, '+').replace(/_/g, '/');
+  // 注意：本段 JS 位于 TS 模板字符串内——正则的 \+ \/ 转义会被外层剥掉
+  // 反斜杠，输出非法正则（实机回归：登录按钮全无反应）。base64 字符集
+  // 替换一律用 split/join，不用正则。
+  const base64 = (b64url + pad).split('-').join('+').split('_').join('/');
   const raw = atob(base64);
   const buf = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
@@ -142,7 +145,7 @@ function bufferToBase64url(buffer) {
   const bytes = new Uint8Array(buffer);
   let str = '';
   for (const byte of bytes) str += String.fromCharCode(byte);
-  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return btoa(str).split('+').join('-').split('/').join('_').split('=').join('');
 }
 
 function serializeAssertion(credential) {

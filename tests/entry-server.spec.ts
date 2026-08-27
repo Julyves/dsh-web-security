@@ -105,6 +105,14 @@ describe('createEntryServer', () => {
     expect(resp.status).toBe(200)
     expect(html).toContain('dsh 安全登录')
 
+    // 内联 <script> 必须能通过纯语法编译（实机回归：模板字符串曾吞掉正则
+    // 转义符，输出 /+/g 非法正则，整个脚本不执行导致登录按钮无反应）。
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1] as string)
+    expect(scripts.length).toBeGreaterThanOrEqual(1)
+    for (const code of scripts) {
+      expect(() => { new Function(code) }).not.toThrow()
+    }
+
     await entry.stop()
   })
 
