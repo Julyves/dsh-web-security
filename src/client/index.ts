@@ -80,6 +80,11 @@ export function apply(ctx: Context): void {
         removePasskey: (username: string, credentialId: string) =>
           securityMethod(ctx, 'passkeyRemove')({ username, credentialId }) as Promise<{ ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }>,
       },
+      policy: {
+        readSettings: () => securityMethod(ctx, 'settingsRead')({}) as Promise<import('./settings/PolicyBlock').SecuritySettingsView>,
+        writeSettings: (partial: Partial<import('./settings/PolicyBlock').SecuritySettingsView>) =>
+          securityMethod(ctx, 'settingsWrite')(partial) as Promise<{ ok: true; value: import('./settings/PolicyBlock').SecuritySettingsView } | { ok: false; error: { code: string; message: string } }>,
+      },
     }),
   }, SecuritySection as never))
 }

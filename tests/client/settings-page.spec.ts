@@ -168,7 +168,15 @@ function makeCtx(overrides: { remoteSecurity?: Record<string, unknown>; locale?:
     },
     remote: {
       $mount: vi.fn<(contribution: unknown) => Promise<() => void>>(async () => () => {}),
-      security: { status: async () => ({ enabled: true, diagnostics: [] }), ...(overrides.remoteSecurity ?? {}) },
+      // 默认全方法的空响应 stub（各 describe 仅 override 关注方法）。
+      security: {
+        status: async () => ({ enabled: true, diagnostics: [] }),
+        accountsList: async () => [],
+        listPasskeys: async () => [{ credentialId: 'stubCredAAAA' }],
+        settingsRead: async () => DEFAULT_SETTINGS_SAMPLE,
+        auditRead: async () => ({ events: [], hasMore: false }),
+        ...(overrides.remoteSecurity ?? {}),
+      },
     },
   }
   return { ctx, slotFactories, registerCalls }
@@ -629,6 +637,104 @@ describe('Story 6/7/8：通行密钥管理', () => {
     const removeBtn = container.querySelector<HTMLButtonElement>('button[data-action="passkey-remove"][data-credential="lastCredAAAA"]')
     await act(async () => { removeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(container.textContent ?? '').toContain('防自锁死')
+    container.remove()
+  })
+})
+
+/** 默认设置样本（独立期望值——与实现 DEFAULT_SETTINGS 同值但独立书写）。 */
+const DEFAULT_SETTINGS_SAMPLE = {
+  passwordLogin: true,
+  passkeyLogin: true,
+  sessionTtlMinutes: 480,
+  maxLoginAttempts: 5,
+  rateLimitWindowMinutes: 15,
+  auditEnabled: true,
+}
+
+describe('Story 9/10：安全策略表单', () => {
+  let bundle: ReturnType<typeof loadBundle>
+  beforeAll(() => {
+    bundle = loadBundle()
+  })
+
+  it('Story 9：初始渲染 settingsRead + 未改动保存按钮禁用', async () => {
+    const settingsRead = vi.fn(async () => DEFAULT_SETTINGS_SAMPLE)
+    const settingsWrite = vi.fn(async () => ({ ok: true, value: DEFAULT_SETTINGS_SAMPLE }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { settingsRead, settingsWrite },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    expect(settingsRead).toHaveBeenCalledWith({})
+    const block = container.querySelector('[data-block="policy"]')
+    expect(block).not.toBeNull()
+    const save = block?.querySelector<HTMLButtonElement>('button[data-action="policy-save"]')
+    expect(save?.disabled).toBe(true)
+    container.remove()
+  })
+
+  it('Story 9：改一个字段 → 保存只提交该脏字段', async () => {
+    const settingsWrite = vi.fn(async () => ({ ok: true, value: { ...DEFAULT_SETTINGS_SAMPLE, sessionTtlMinutes: 240 } }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { settingsRead: vi.fn(async () => DEFAULT_SETTINGS_SAMPLE), settingsWrite },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const block = container.querySelector('[data-block="policy"]')
+    const ttl = block?.querySelector<HTMLInputElement>('input[data-field="sessionTtlMinutes"]')
+    expect(ttl).not.toBeNull()
+    await act(async () => { setInputValue(ttl as HTMLInputElement, '240') })
+    const save = block?.querySelector<HTMLButtonElement>('button[data-action="policy-save"]')
+    expect(save?.disabled).toBe(false)
+    await act(async () => { save?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(settingsWrite).toHaveBeenCalledWith({ sessionTtlMinutes: 240 })
+    container.remove()
+  })
+
+  it('Story 10：降级变更（关审计）→ RiskConfirmation 确认后才提交', async () => {
+    const settingsWrite = vi.fn(async () => ({ ok: true, value: { ...DEFAULT_SETTINGS_SAMPLE, auditEnabled: false } }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { settingsRead: vi.fn(async () => DEFAULT_SETTINGS_SAMPLE), settingsWrite },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const block = container.querySelector('[data-block="policy"]')
+    const auditToggle = block?.querySelector<HTMLInputElement>('input[data-field="auditEnabled"]')
+    expect(auditToggle).not.toBeNull()
+    await act(async () => { auditToggle?.click() })
+    const save = block?.querySelector<HTMLButtonElement>('button[data-action="policy-save"]')
+    await act(async () => { save?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    // 未确认前不提交。
+    expect(settingsWrite).not.toHaveBeenCalled()
+    // 风险确认出现 → 确认 → 提交。
+    const confirmBtn = block?.querySelector<HTMLButtonElement>('button[data-action="risk-confirm"]')
+    expect(confirmBtn).not.toBeNull()
+    await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(settingsWrite).toHaveBeenCalledWith({ auditEnabled: false })
+    container.remove()
+  })
+
+  it('保存失败（自锁死）→ host 错误呈现', async () => {
+    const settingsWrite = vi.fn(async () => ({
+      ok: false,
+      error: { code: 'lockout-prevented', message: '不能同时关闭密码登录与通行密钥登录（防自锁死）' },
+    }))
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: { settingsRead: vi.fn(async () => DEFAULT_SETTINGS_SAMPLE), settingsWrite },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    const block = container.querySelector('[data-block="policy"]')
+    const pwToggle = block?.querySelector<HTMLInputElement>('input[data-field="passwordLogin"]')
+    const pkToggle = block?.querySelector<HTMLInputElement>('input[data-field="passkeyLogin"]')
+    await act(async () => { pwToggle?.click() })
+    await act(async () => { pkToggle?.click() })
+    const save = block?.querySelector<HTMLButtonElement>('button[data-action="policy-save"]')
+    await act(async () => { save?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    // 同关两个开关是自锁死方向——确认后提交被 host 拒绝。
+    const confirmBtn = block?.querySelector<HTMLButtonElement>('button[data-action="risk-confirm"]')
+    await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(block?.textContent ?? '').toContain('不能同时关闭密码登录与通行密钥登录')
     container.remove()
   })
 })
