@@ -31,6 +31,8 @@ export interface PasskeysApi {
 export interface PasskeysBlockProps {
   t: (key: string) => string
   api: PasskeysApi
+  /** 服务器是否已配置 rpID（决定通行密钥是否可用）。 */
+  serverAvailable?: boolean
 }
 
 /** 浏览器 WebAuthn 可用性探测（secure context + credentials API）。 */
@@ -43,7 +45,7 @@ export function webAuthnAvailable(): boolean {
 }
 
 /** 通行密钥区块组件。 */
-export const PasskeysBlock: FC<PasskeysBlockProps> = ({ t, api }) => {
+export const PasskeysBlock: FC<PasskeysBlockProps> = ({ t, api, serverAvailable }) => {
   const [accounts, setAccounts] = useState<readonly AccountSummaryView[]>([])
   const [selected, setSelected] = useState<string | undefined>(undefined)
   const [creds, setCreds] = useState<readonly PasskeyView[]>([])
@@ -69,7 +71,7 @@ export const PasskeysBlock: FC<PasskeysBlockProps> = ({ t, api }) => {
   }
 
   async function register(): Promise<void> {
-    if (selected === undefined || busy || !available) return
+    if (selected === undefined || busy || !available || serverAvailable !== true) return
     setBusy(true)
     setBlockError(undefined)
     try {
@@ -158,6 +160,7 @@ export const PasskeysBlock: FC<PasskeysBlockProps> = ({ t, api }) => {
           </Button>
         ))}
       </div>
+      {serverAvailable === false ? <p data-passkey-server-unavailable="" style={form.error}>{t('passkeyServerUnavailable')}</p> : null}
       {available ? null : <p data-webauthn-unavailable="" style={form.error}>{t('webauthnUnavailable')}</p>}
       {selected !== undefined
         ? (
@@ -175,7 +178,7 @@ export const PasskeysBlock: FC<PasskeysBlockProps> = ({ t, api }) => {
                       </li>
                     ))}
               </ul>
-              <Button data-action="passkey-register" disabled={!available || busy} onClick={() => { void register() }}>
+              <Button data-action="passkey-register" disabled={!available || serverAvailable !== true || busy} onClick={() => { void register() }}>
                 {t('registerPasskey')}
               </Button>
             </div>

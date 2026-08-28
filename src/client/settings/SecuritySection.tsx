@@ -17,6 +17,9 @@ import { AuditBlock, type AuditApi } from './AuditBlock.tsx'
 export interface SecurityStatusView {
   readonly enabled: boolean
   readonly diagnostics: readonly string[]
+  readonly methods: { readonly password: boolean; readonly passkey: boolean }
+  readonly hasAccounts: boolean | null
+  readonly entry: { readonly host: string; readonly port: number; readonly tls: string }
 }
 
 /** 注入面（apply 闭包提供；随纵切扩展 api 方法）。 */
@@ -88,7 +91,7 @@ export const SecuritySection: FC<SecuritySectionProps> = (props) => {
       </Section>
       <Section title={t('passkeyTitle')}>
         {props.passkeys !== undefined
-          ? <PasskeysBlock t={t} api={props.passkeys} />
+          ? <PasskeysBlock t={t} api={props.passkeys} serverAvailable={status?.methods?.passkey} />
           : null}
       </Section>
       <Section title={t('policyTitle')}>

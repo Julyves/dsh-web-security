@@ -119,12 +119,23 @@ const ZH: Record<string, string> = {
   passkeyCancelled: '通行密钥操作已取消',
   passkeyError: '通行密钥操作失败',
   webauthnUnavailable: '此环境不支持通行密钥（需要 HTTPS 安全上下文）',
+  passkeyServerUnavailable: '通行密钥功能未启用：服务器未配置 rpID（域名）。请在 cordis.patch.yml 中设置 config.rpID 并重启宿主。',
   policyTitle: '安全策略',
   auditTitle: '审计日志',
   retry: '重试',
   loadMore: '加载更多',
   save: '保存',
   downgradeConfirm: '本次变更会削弱安全姿态，确认执行？',
+  fieldPasswordLogin: '密码登录',
+  fieldPasskeyLogin: '通行密钥登录',
+  fieldAuditEnabled: '审计日志',
+  fieldSessionTtl: '会话时长（分钟）',
+  fieldMaxAttempts: '失败锁定阈值（次）',
+  fieldRateWindow: '失败窗口（分钟）',
+  selectedAccount: '已选账号',
+  noPasskeys: '暂无通行密钥',
+  pickAccountHint: '选择一个账号以查看或注册通行密钥',
+  noAuditEvents: '暂无审计记录',
 }
 
 /** en 词典（Story 2b 断言字面量）。 */
@@ -151,12 +162,23 @@ const EN: Record<string, string> = {
   passkeyCancelled: 'Passkey operation cancelled',
   passkeyError: 'Passkey operation failed',
   webauthnUnavailable: 'Passkeys are unavailable in this context',
+  passkeyServerUnavailable: 'Passkey not enabled: server rpID not configured. Set config.rpID in cordis.patch.yml and restart the host.',
   policyTitle: 'Security policy',
   auditTitle: 'Audit log',
   retry: 'Retry',
   loadMore: 'Load more',
   save: 'Save',
   downgradeConfirm: 'This change weakens the security posture. Proceed?',
+  fieldPasswordLogin: 'Password login',
+  fieldPasskeyLogin: 'Passkey login',
+  fieldAuditEnabled: 'Audit log',
+  fieldSessionTtl: 'Session TTL (minutes)',
+  fieldMaxAttempts: 'Failed-login lockout threshold',
+  fieldRateWindow: 'Failure window (minutes)',
+  selectedAccount: 'Selected account',
+  noPasskeys: 'No passkeys yet',
+  pickAccountHint: 'Pick an account to view or register passkeys',
+  noAuditEvents: 'No audit events yet',
 }
 
 /** 设置受控 input 的值并派发 input 事件（React 兼容路径）。 */
@@ -190,7 +212,7 @@ function makeCtx(overrides: { remoteSecurity?: Record<string, unknown>; locale?:
       // 实机回归：face 未解包时 accounts.map 炸白屏。各 describe 的 override
       // 书写业务载荷（查询类为业务值、写类为业务信封）即可，包装器统一包 gateway 信封。
       const raw: Record<string, unknown> = {
-        status: async () => ({ enabled: true, diagnostics: [] }),
+        status: async () => ({ enabled: true, diagnostics: [], methods: { password: true, passkey: true }, hasAccounts: true, entry: { host: '127.0.0.1', port: 3080, tls: 'self-signed' } }),
         accountsList: async () => [],
         listPasskeys: async () => [{ credentialId: 'stubCredAAAA' }],
         settingsRead: async () => DEFAULT_SETTINGS_SAMPLE,
@@ -698,6 +720,33 @@ describe('Story 6/7/8：通行密钥管理', () => {
     const removeBtn = container.querySelector<HTMLButtonElement>('button[data-action="passkey-remove"][data-credential="lastCredAAAA"]')
     await act(async () => { removeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(container.textContent ?? '').toContain('防自锁死')
+    container.remove()
+  })
+
+  it('server rpID 未配置 → 注册按钮禁用且显示服务器未启用提示，点击不触发 API', async () => {
+    const credentialsCreate = vi.fn()
+    enableWebAuthn(credentialsCreate)
+    const passkeyRegisterBegin = vi.fn()
+    const { ctx, slotFactories, registerCalls } = makeCtx({
+      remoteSecurity: {
+        status: async () => ({ enabled: true, diagnostics: [], methods: { password: true, passkey: false }, hasAccounts: true, entry: { host: '127.0.0.1', port: 3080, tls: 'self-signed' } }),
+        accountsList: vi.fn(async () => [{ username: 'admin', hasPasskey: false, createdAt: 1 }]),
+        passkeyRegisterBegin,
+      },
+    })
+    bundle.exports.apply(ctx)
+    const container = await renderSection(ctx, slotFactories, registerCalls)
+    await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+    const pick = container.querySelector<HTMLButtonElement>('button[data-action="passkey-account"][data-username="admin"]')
+    await act(async () => { pick?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+    const registerBtn = container.querySelector<HTMLButtonElement>('button[data-action="passkey-register"]')
+    expect(registerBtn?.disabled).toBe(true)
+    expect(container.textContent ?? '').toContain('服务器未配置 rpID')
+    expect(container.querySelector('[data-passkey-server-unavailable]')).not.toBeNull()
+    await act(async () => { registerBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(passkeyRegisterBegin).not.toHaveBeenCalled()
+    expect(credentialsCreate).not.toHaveBeenCalled()
     container.remove()
   })
 })

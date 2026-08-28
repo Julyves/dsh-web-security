@@ -43,6 +43,7 @@ export type SecurityLocaleKey =
   | 'noPasskeys'
   | 'pickAccountHint'
   | 'noAuditEvents'
+  | 'passkeyServerUnavailable'
 
 export const zh: Record<SecurityLocaleKey, string> = {
   page: '安全',
@@ -83,6 +84,7 @@ export const zh: Record<SecurityLocaleKey, string> = {
   noPasskeys: '暂无通行密钥',
   pickAccountHint: '选择一个账号以查看或注册通行密钥',
   noAuditEvents: '暂无审计记录',
+  passkeyServerUnavailable: '通行密钥功能未启用：服务器未配置 rpID（域名）。请在 cordis.patch.yml 中设置 config.rpID 并重启宿主。',
 }
 
 export const en: Record<SecurityLocaleKey, string> = {
@@ -124,4 +126,5 @@ export const en: Record<SecurityLocaleKey, string> = {
   noPasskeys: 'No passkeys yet',
   pickAccountHint: 'Pick an account to view or register passkeys',
   noAuditEvents: 'No audit events yet',
+  passkeyServerUnavailable: 'Passkey not enabled: server rpID not configured. Set config.rpID in cordis.patch.yml and restart the host.',
 }
