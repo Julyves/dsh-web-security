@@ -177,6 +177,7 @@ function makeCtx(overrides: { remoteSecurity?: Record<string, unknown>; locale?:
       register: vi.fn<(ns: string, dicts: { zh: Record<string, string>; en: Record<string, string> }) => () => void>(() => () => {}),
       bind: vi.fn((ns: string) => (key: string) => (ns === 'settings.security' ? dict[key] ?? key : key)),
     },
+    inject: vi.fn((keys: readonly string[], cb: (c: unknown) => void) => { cb(ctx) }),
     slots: {
       inject: vi.fn((name: string, factory: () => unknown) => { slotFactories.set(name, factory) }),
       register: vi.fn((options: { name: string; id?: string; order?: number; inject?: () => Record<string, unknown> }, component: unknown) => {
@@ -184,24 +185,42 @@ function makeCtx(overrides: { remoteSecurity?: Record<string, unknown>; locale?:
         return () => {}
       }),
     },
-    remote: {
-      $mount: vi.fn<(contribution: unknown) => Promise<() => void>>(async () => () => {}),
-      // 默认全方法的空响应 stub（各 describe 仅 override 关注方法）。
-      security: {
+    remote: (() => {
+      // 真实 RemoteStore 返回 gateway 信封 RpcResult（{ok:true,value:业务载荷}）。
+      // 实机回归：face 未解包时 accounts.map 炸白屏。各 describe 的 override
+      // 书写业务载荷（查询类为业务值、写类为业务信封）即可，包装器统一包 gateway 信封。
+      const raw: Record<string, unknown> = {
         status: async () => ({ enabled: true, diagnostics: [] }),
         accountsList: async () => [],
         listPasskeys: async () => [{ credentialId: 'stubCredAAAA' }],
         settingsRead: async () => DEFAULT_SETTINGS_SAMPLE,
         auditRead: async () => ({ events: [], hasMore: false }),
         ...(overrides.remoteSecurity ?? {}),
-      },
-    },
+      }
+      const security = new Proxy(raw, {
+        get(target, prop: string) {
+          const v = target[prop]
+          if (typeof v !== 'function') return v
+          return async (...args: unknown[]) => {
+            const r = await (v as (...a: unknown[]) => unknown)(...args)
+            return { ok: true, value: r }
+          }
+        },
+      })
+      return {
+        $mount: vi.fn<(contribution: unknown) => Promise<() => void>>(async () => () => {}),
+        security,
+      }
+    })(),
   }
   return { ctx, slotFactories, registerCalls }
 }
 
 /** 挂载并渲染设置页组件（四股合成：owner close + inject 面展开）。 */
 async function renderSection(ctx: ReturnType<typeof makeCtx>['ctx'], slotFactories: Map<string, () => unknown>, registerCalls: ReturnType<typeof makeCtx>['registerCalls']): Promise<HTMLDivElement> {
+  // apply 的 slot 注册发生在 $mount.then → ctx.inject 回调内（child fiber
+  // 范式）——先冲刷微任务让注册落地。
+  await new Promise<void>(r => setTimeout(r, 0))
   ;(slotFactories.get('settings.section') as () => unknown)()
   const Component = registerCalls[0]?.component as FC<Record<string, unknown>>
   const injectFace = (ctx.slots.register.mock.calls[0]?.[0] as { inject?: () => Record<string, unknown> }).inject?.() ?? {}
@@ -227,16 +246,18 @@ describe('Story 1：设置页挂载（lib/client.js seam）', () => {
     expect(typeof bundle.exports.apply).toBe('function')
   })
 
-  it('apply：注册词典 + 经 slots.inject 等待 settings.section 声明', () => {
+  it('apply：注册词典 + $mount 后经 child inject 注册槽位', async () => {
     const { ctx } = makeCtx()
     bundle.exports.apply(ctx)
     expect(ctx.locale.register).toHaveBeenCalledWith('settings.security', expect.objectContaining({ zh: expect.any(Object), en: expect.any(Object) }))
+    await new Promise<void>(r => setTimeout(r, 0))
     expect(ctx.slots.inject).toHaveBeenCalledWith('settings.section', expect.any(Function))
   })
 
-  it('槽位注册：name=settings.section、id=security、label 跟随词典', () => {
+  it('槽位注册：name=settings.section、id=security、label 跟随词典', async () => {
     const { ctx, slotFactories, registerCalls } = makeCtx()
     bundle.exports.apply(ctx)
+    await new Promise<void>(r => setTimeout(r, 0))
     const factory = slotFactories.get('settings.section')
     expect(factory).toBeDefined()
     ;(factory as () => unknown)()
@@ -303,9 +324,10 @@ describe('Story 2a：诊断横幅（remote 接线）', () => {
     container.remove()
   })
 
-  it('remote 贡献经 $mount 挂载（TypertRemoteContribution 真实 schema）', () => {
+  it('remote 贡献经 $mount 挂载（TypertRemoteContribution 真实 schema）', async () => {
     const { ctx } = makeCtx()
     bundle.exports.apply(ctx)
+    await new Promise<void>(r => setTimeout(r, 0))
     expect(ctx.remote.$mount).toHaveBeenCalled()
     const contribution = (ctx.remote.$mount.mock.calls[0]?.[0]) as { package?: string; descriptors?: unknown[] }
     // 真实运行时（typert registry）校验：package 必填（validateSegment 读
@@ -314,6 +336,16 @@ describe('Story 2a：诊断横幅（remote 接线）', () => {
     expect(contribution?.package).toBe('dsh-web-security')
     expect(Array.isArray(contribution?.descriptors)).toBe(true)
     expect((contribution?.descriptors ?? []).length).toBeGreaterThan(0)
+  })
+
+  it('$mount 后经 child fiber inject 声明 remote.security（宿主属性代理守卫——实机回归）', async () => {
+    const { ctx } = makeCtx()
+    bundle.exports.apply(ctx)
+    await new Promise<void>(r => setTimeout(r, 0))
+    // 宿主守卫：ctx.remote.security 未声明 inject 直接属性访问即抛
+    // cannot get property "remote.security" without inject → entry crash →
+    // SlotErrorBoundary 空白（实机白屏根因）。
+    expect(ctx.inject).toHaveBeenCalledWith(['remote.security'], expect.any(Function))
   })
 })
 

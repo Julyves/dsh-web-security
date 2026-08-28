@@ -37,6 +37,10 @@ AGENT.md
 # Release
 release/
 
+# Local test environment
+.test-dsh-home/
+.pnpm-store/
+
 # Scripts (local-only, not tracked)
 scripts/
 
