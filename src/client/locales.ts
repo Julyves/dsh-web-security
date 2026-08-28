@@ -39,6 +39,10 @@ export type SecurityLocaleKey =
   | 'fieldSessionTtl'
   | 'fieldMaxAttempts'
   | 'fieldRateWindow'
+  | 'selectedAccount'
+  | 'noPasskeys'
+  | 'pickAccountHint'
+  | 'noAuditEvents'
 
 export const zh: Record<SecurityLocaleKey, string> = {
   page: '安全',
@@ -75,6 +79,10 @@ export const zh: Record<SecurityLocaleKey, string> = {
   fieldSessionTtl: '会话时长（分钟）',
   fieldMaxAttempts: '失败锁定阈值（次）',
   fieldRateWindow: '失败窗口（分钟）',
+  selectedAccount: '已选账号',
+  noPasskeys: '暂无通行密钥',
+  pickAccountHint: '选择一个账号以查看或注册通行密钥',
+  noAuditEvents: '暂无审计记录',
 }
 
 export const en: Record<SecurityLocaleKey, string> = {
@@ -112,4 +120,8 @@ export const en: Record<SecurityLocaleKey, string> = {
   fieldSessionTtl: 'Session TTL (minutes)',
   fieldMaxAttempts: 'Failed-login lockout threshold',
   fieldRateWindow: 'Failure window (minutes)',
+  selectedAccount: 'Selected account',
+  noPasskeys: 'No passkeys yet',
+  pickAccountHint: 'Pick an account to view or register passkeys',
+  noAuditEvents: 'No audit events yet',
 }

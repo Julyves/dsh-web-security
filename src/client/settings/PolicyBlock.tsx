@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import type { FC } from 'react'
 import { Button, Input, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Envelope } from './AccountsBlock.tsx'
+import { form, policy } from './styles.ts'
 
 /** 安全设置视图（SecuritySettings 的可变 UI 草稿镜像）。 */
 export interface SecuritySettingsView {
@@ -104,62 +105,64 @@ export const PolicyBlock: FC<PolicyBlockProps> = ({ t, api }) => {
   }
 
   return (
-    <div data-block="policy" data-state={state}>
-      <label>
-        <span>{t('fieldPasswordLogin')}</span>
-        <input
-          data-field="passwordLogin"
-          type="checkbox"
-          checked={draft.passwordLogin}
-          onChange={(e) => setDraft({ ...draft, passwordLogin: e.target.checked })}
-        />
-      </label>
-      <label>
-        <span>{t('fieldPasskeyLogin')}</span>
-        <input
-          data-field="passkeyLogin"
-          type="checkbox"
-          checked={draft.passkeyLogin}
-          onChange={(e) => setDraft({ ...draft, passkeyLogin: e.target.checked })}
-        />
-      </label>
-      <label>
-        <span>{t('fieldAuditEnabled')}</span>
-        <input
-          data-field="auditEnabled"
-          type="checkbox"
-          checked={draft.auditEnabled}
-          onChange={(e) => setDraft({ ...draft, auditEnabled: e.target.checked })}
-        />
-      </label>
-      <label>
-        <span>{t('fieldSessionTtl')}</span>
-        <Input
-          data-field="sessionTtlMinutes"
-          value={String(draft.sessionTtlMinutes)}
-          onChange={(v) => setDraft({ ...draft, sessionTtlMinutes: Number(v) })}
-          type="number"
-        />
-      </label>
-      <label>
-        <span>{t('fieldMaxAttempts')}</span>
-        <Input
-          data-field="maxLoginAttempts"
-          value={String(draft.maxLoginAttempts)}
-          onChange={(v) => setDraft({ ...draft, maxLoginAttempts: Number(v) })}
-          type="number"
-        />
-      </label>
-      <label>
-        <span>{t('fieldRateWindow')}</span>
-        <Input
-          data-field="rateLimitWindowMinutes"
-          value={String(draft.rateLimitWindowMinutes)}
-          onChange={(v) => setDraft({ ...draft, rateLimitWindowMinutes: Number(v) })}
-          type="number"
-        />
-      </label>
-      {saveError !== undefined ? <p data-save-error="">{saveError}</p> : null}
+    <div data-block="policy" data-state={state} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div style={policy.grid}>
+        <label style={policy.toggleRow}>
+          <input
+            data-field="passwordLogin"
+            type="checkbox"
+            checked={draft.passwordLogin}
+            onChange={(e) => setDraft({ ...draft, passwordLogin: e.target.checked })}
+          />
+          <span style={policy.label}>{t('fieldPasswordLogin')}</span>
+        </label>
+        <label style={policy.toggleRow}>
+          <input
+            data-field="passkeyLogin"
+            type="checkbox"
+            checked={draft.passkeyLogin}
+            onChange={(e) => setDraft({ ...draft, passkeyLogin: e.target.checked })}
+          />
+          <span style={policy.label}>{t('fieldPasskeyLogin')}</span>
+        </label>
+        <label style={policy.toggleRow}>
+          <input
+            data-field="auditEnabled"
+            type="checkbox"
+            checked={draft.auditEnabled}
+            onChange={(e) => setDraft({ ...draft, auditEnabled: e.target.checked })}
+          />
+          <span style={policy.label}>{t('fieldAuditEnabled')}</span>
+        </label>
+        <label style={policy.numberField}>
+          <span style={{ fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }}>{t('fieldSessionTtl')}</span>
+          <Input
+            data-field="sessionTtlMinutes"
+            value={String(draft.sessionTtlMinutes)}
+            onChange={(v) => setDraft({ ...draft, sessionTtlMinutes: Number(v) })}
+            type="number"
+          />
+        </label>
+        <label style={policy.numberField}>
+          <span style={{ fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }}>{t('fieldMaxAttempts')}</span>
+          <Input
+            data-field="maxLoginAttempts"
+            value={String(draft.maxLoginAttempts)}
+            onChange={(v) => setDraft({ ...draft, maxLoginAttempts: Number(v) })}
+            type="number"
+          />
+        </label>
+        <label style={policy.numberField}>
+          <span style={{ fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }}>{t('fieldRateWindow')}</span>
+          <Input
+            data-field="rateLimitWindowMinutes"
+            value={String(draft.rateLimitWindowMinutes)}
+            onChange={(v) => setDraft({ ...draft, rateLimitWindowMinutes: Number(v) })}
+            type="number"
+          />
+        </label>
+      </div>
+      {saveError !== undefined ? <p data-save-error="" style={form.error}>{saveError}</p> : null}
       {pendingSave !== undefined
         ? (
             <RiskConfirmation
@@ -170,13 +173,15 @@ export const PolicyBlock: FC<PolicyBlockProps> = ({ t, api }) => {
             </RiskConfirmation>
           )
         : null}
-      <Button
-        data-action="policy-save"
-        disabled={!hasDirty || saving}
-        onClick={() => { if (downgrade) setPendingSave(dirty); else void submit(dirty) }}
-      >
-        {t('save')}
-      </Button>
+      <div>
+        <Button
+          data-action="policy-save"
+          disabled={!hasDirty || saving}
+          onClick={() => { if (downgrade) setPendingSave(dirty); else void submit(dirty) }}
+        >
+          {t('save')}
+        </Button>
+      </div>
     </div>
   )
 }

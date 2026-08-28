@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import type { FC } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { audit, form } from './styles.ts'
 
 /** 审计事件视图（AuthEvent 镜像）。 */
 export interface AuditEventView {
@@ -66,30 +67,35 @@ export const AuditBlock: FC<AuditBlockProps> = ({ t, api }) => {
   }, [api])
 
   return (
-    <div data-block="audit" data-state={state}>
+    <div data-block="audit" data-state={state} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
       {state === 'error'
         ? (
-            <>
-              <p data-error="">{t('loadFailed')}</p>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <p data-error="" style={form.error}>{t('loadFailed')}</p>
               <Button data-action="audit-retry" onClick={() => { void load(0) }}>{t('retry')}</Button>
-            </>
+            </div>
           )
         : state === 'ready'
           ? (
               <>
-                <ul>
-                  {events.map((e, i) => (
-                    <li key={`${e.at}-${i}`} data-audit-item="">
-                      <span>{e.kind}</span>
-                      <time>{new Date(e.at).toISOString()}</time>
-                      <span>{e.actor}</span>
-                      {e.ip !== undefined ? <span>{e.ip}</span> : null}
-                      {e.detail !== undefined ? <span>{e.detail}</span> : null}
-                    </li>
-                  ))}
+                <ul style={audit.list}>
+                  {events.map((e, i) => {
+                    const alt = i % 2 === 1
+                    return (
+                      <li key={`${e.at}-${i}`} data-audit-item="" style={alt ? { ...audit.row, ...audit.rowAlt } : audit.row}>
+                        <span style={audit.kind}>{e.kind}</span>
+                        <time style={audit.time}>{new Date(e.at).toLocaleString()}</time>
+                        <span style={audit.actor} title={e.actor}>{e.actor}</span>
+                        <span style={{ ...audit.actor, color: 'var(--dsw-alias-label-tertiary)', fontSize: '11px' }} title={e.detail ?? e.ip ?? ''}>
+                          {e.detail ?? e.ip ?? '—'}
+                        </span>
+                      </li>
+                    )
+                  })}
                 </ul>
+                {events.length === 0 ? <p style={form.hint}>{t('noAuditEvents')}</p> : null}
                 {hasMore
-                  ? <Button data-action="audit-more" disabled={busy} onClick={() => { void load(events.length) }}>{t('loadMore')}</Button>
+                  ? <div><Button data-action="audit-more" disabled={busy} onClick={() => { void load(events.length) }}>{t('loadMore')}</Button></div>
                   : null}
               </>
             )

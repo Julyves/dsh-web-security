@@ -11,6 +11,7 @@ import type { FC, ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AccountSummaryView, Envelope } from './AccountsBlock.tsx'
 import { base64urlToBuffer, bufferToBase64url } from './webauthn-codec.ts'
+import { form, list } from './styles.ts'
 
 /** 凭证摘要视图。 */
 export interface PasskeyView {
@@ -143,39 +144,44 @@ export const PasskeysBlock: FC<PasskeysBlockProps> = ({ t, api }) => {
   }
 
   return (
-    <div data-block="passkeys">
-      {accounts.map((a) => (
-        <Button
-          key={a.username}
-          data-action="passkey-account"
-          data-username={a.username}
-          disabled={busy}
-          onClick={() => { void pick(a.username) }}
-        >
-          {a.username}
-        </Button>
-      ))}
-      {available ? null : <p data-webauthn-unavailable="">{t('webauthnUnavailable')}</p>}
+    <div data-block="passkeys" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        {accounts.map((a) => (
+          <Button
+            key={a.username}
+            data-action="passkey-account"
+            data-username={a.username}
+            disabled={busy}
+            onClick={() => { void pick(a.username) }}
+          >
+            {a.username}
+          </Button>
+        ))}
+      </div>
+      {available ? null : <p data-webauthn-unavailable="" style={form.error}>{t('webauthnUnavailable')}</p>}
       {selected !== undefined
         ? (
-            <>
-              <ul>
-                {creds.map((c) => (
-                  <li key={c.credentialId}>
-                    <code>{c.credentialId}</code>
-                    <Button data-action="passkey-remove" data-credential={c.credentialId} disabled={busy} onClick={() => { void remove(c.credentialId) }}>
-                      {t('remove')}
-                    </Button>
-                  </li>
-                ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--dsw-alias-border-l2, rgba(255,255,255,0.08))' }}>
+              <span style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>{t('selectedAccount')}: <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{selected}</strong></span>
+              <ul style={list.ul}>
+                {creds.length === 0
+                  ? <li style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', padding: '4px 0' }}>{t('noPasskeys')}</li>
+                  : creds.map((c) => (
+                      <li key={c.credentialId} style={list.row}>
+                        <code style={{ fontSize: '12px', wordBreak: 'break-all', flex: 1 }}>{c.credentialId}</code>
+                        <Button data-action="passkey-remove" data-credential={c.credentialId} disabled={busy} onClick={() => { void remove(c.credentialId) }}>
+                          {t('remove')}
+                        </Button>
+                      </li>
+                    ))}
               </ul>
               <Button data-action="passkey-register" disabled={!available || busy} onClick={() => { void register() }}>
                 {t('registerPasskey')}
               </Button>
-            </>
+            </div>
           )
-        : null}
-      {blockError !== undefined ? <p data-block-error="">{blockError}</p> : null}
+        : <p style={form.hint}>{t('pickAccountHint')}</p>}
+      {blockError !== undefined ? <p data-block-error="" style={form.error}>{blockError}</p> : null}
     </div>
   )
 }

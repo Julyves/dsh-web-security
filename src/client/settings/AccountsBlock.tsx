@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import type { FC, ReactNode } from 'react'
 import { Button, Input, Pill, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives'
+import { form, list } from './styles.ts'
 
 /** 账号摘要视图（AccountSummary 镜像）。 */
 export interface AccountSummaryView {
@@ -68,21 +69,23 @@ function AccountRow({ account, t, api, onRemoved }: {
   }
 
   return (
-    <li data-account={account.username}>
-      <span>{account.username}</span>
+    <li data-account={account.username} style={list.row}>
+      <span style={list.name}>{account.username}</span>
       {account.hasPasskey ? <Pill>{t('hasPasskey')}</Pill> : null}
-      <Button data-action="password-open" data-username={account.username} onClick={() => { setEditing(!editing); setUpdated(false); setRowError(undefined) }}>
-        {t('changePassword')}
-      </Button>
-      <Button data-action="remove-open" data-username={account.username} onClick={() => { setConfirmingRemove(true); setRowError(undefined) }}>
-        {t('removeAccount')}
-      </Button>
-      {updated ? <span data-updated="">{t('passwordUpdated')}</span> : null}
+      <span style={list.actions}>
+        <Button data-action="password-open" data-username={account.username} onClick={() => { setEditing(!editing); setUpdated(false); setRowError(undefined) }}>
+          {t('changePassword')}
+        </Button>
+        <Button data-action="remove-open" data-username={account.username} onClick={() => { setConfirmingRemove(true); setRowError(undefined) }}>
+          {t('removeAccount')}
+        </Button>
+      </span>
+      {updated ? <span data-updated="" style={{ color: 'var(--dsw-alias-label-success, #2e7d32)', fontSize: '12px' }}>{t('passwordUpdated')}</span> : null}
       {editing
         ? (
-            <form data-role="password-edit" data-username={account.username} onSubmit={(e) => { e.preventDefault(); void submitPassword() }}>
-              <Input value={current} onChange={setCurrent} type="password" placeholder={t('currentPassword')} autoComplete="current-password" />
-              <Input value={next} onChange={setNext} type="password" placeholder={t('newPassword')} autoComplete="new-password" />
+            <form data-role="password-edit" data-username={account.username} onSubmit={(e) => { e.preventDefault(); void submitPassword() }} style={{ ...form.row, width: '100%', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--dsw-alias-border-l2, rgba(255,255,255,0.08))' }}>
+              <span style={form.field}><Input value={current} onChange={setCurrent} type="password" placeholder={t('currentPassword')} autoComplete="current-password" /></span>
+              <span style={form.field}><Input value={next} onChange={setNext} type="password" placeholder={t('newPassword')} autoComplete="new-password" /></span>
               <Button data-action="password-submit" disabled={current === '' || next === ''} onClick={() => { void submitPassword() }}>
                 {t('submit')}
               </Button>
@@ -91,12 +94,14 @@ function AccountRow({ account, t, api, onRemoved }: {
         : null}
       {confirmingRemove
         ? (
-            <RiskConfirmation confirm={() => { void submitRemove() }} cancel={() => setConfirmingRemove(false)}>
-              {t('confirmRemove')}
-            </RiskConfirmation>
+            <div style={{ width: '100%' }}>
+              <RiskConfirmation confirm={() => { void submitRemove() }} cancel={() => setConfirmingRemove(false)}>
+                {t('confirmRemove')}
+              </RiskConfirmation>
+            </div>
           )
         : null}
-      {rowError !== undefined && !confirmingRemove ? <p data-row-error="">{rowError}</p> : null}
+      {rowError !== undefined && !confirmingRemove ? <p data-row-error="" style={form.error}>{rowError}</p> : null}
     </li>
   )
 }
@@ -136,13 +141,13 @@ export const AccountsBlock: FC<AccountsBlockProps> = ({ t, api }) => {
   }
 
   return (
-    <div>
-      <section data-block="accounts" data-state={state}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <section data-block="accounts" data-state={state} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {state === 'error'
-          ? <p data-error="">{t('loadFailed')}</p>
+          ? <p data-error="" style={form.error}>{t('loadFailed')}</p>
           : state === 'ready'
             ? (
-                <ul>
+                <ul style={list.ul}>
                   {accounts.map((a) => (
                     <AccountRow
                       key={a.username}
@@ -155,14 +160,14 @@ export const AccountsBlock: FC<AccountsBlockProps> = ({ t, api }) => {
                 </ul>
               )
             : null}
-        <form data-role="account-create" onSubmit={(e) => { e.preventDefault(); void submit() }}>
-          <Input value={username} onChange={setUsername} placeholder={t('username')} autoComplete="username" />
-          <Input value={password} onChange={setPassword} type="password" placeholder={t('password')} autoComplete="new-password" />
-          {formError !== undefined ? <p data-form-error="">{formError}</p> : null}
+        <form data-role="account-create" onSubmit={(e) => { e.preventDefault(); void submit() }} style={form.row}>
+          <span style={form.field}><Input value={username} onChange={setUsername} placeholder={t('username')} autoComplete="username" /></span>
+          <span style={form.field}><Input value={password} onChange={setPassword} type="password" placeholder={t('password')} autoComplete="new-password" /></span>
           <Button data-action="account-create" disabled={creating || username === '' || password === ''} onClick={() => { void submit() }}>
             {t('create')}
           </Button>
         </form>
+        {formError !== undefined ? <p data-form-error="" style={form.error}>{formError}</p> : null}
       </section>
     </div>
   )

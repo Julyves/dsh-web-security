@@ -40,11 +40,14 @@ export type SecuritySectionProps = Partial<SecuritySectionInjected> & {
   close?: () => void
 }
 
+import { page, section } from './styles.ts'
+
 /** 区块卡片容器。 */
 function Section({ title, children }: { title: string; children?: ReactNode }): ReactNode {
   return (
-    <section data-section="">
-      <h3>{title}</h3>
+    <section data-section="" style={section.card}>
+      <h3 style={section.title}>{title}</h3>
+      <div style={section.divider} />
       {children}
     </section>
   )
@@ -65,14 +68,14 @@ export const SecuritySection: FC<SecuritySectionProps> = (props) => {
   }, [props.loadStatus])
 
   return (
-    <div data-security-page="">
+    <div data-security-page="" style={page.container}>
       {statusError
-        ? <p data-status-error="">{t('statusLoadFailed')}</p>
+        ? <p data-status-error="" style={page.banner}>{t('statusLoadFailed')}</p>
         : status !== undefined && status.diagnostics.length > 0
           ? (
-              <div data-banner="" role="alert">
+              <div data-banner="" role="alert" style={page.banner}>
                 <strong>{t('bannerTitle')}</strong>
-                <ul>
+                <ul style={{ margin: '8px 0 0', paddingLeft: '18px' }}>
                   {status.diagnostics.map((d) => <li key={d}>{d}</li>)}
                 </ul>
               </div>
