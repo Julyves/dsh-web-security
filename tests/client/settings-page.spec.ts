@@ -303,12 +303,17 @@ describe('Story 2a：诊断横幅（remote 接线）', () => {
     container.remove()
   })
 
-  it('remote 贡献经 $mount 挂载（security 命名空间）', () => {
+  it('remote 贡献经 $mount 挂载（TypertRemoteContribution 真实 schema）', () => {
     const { ctx } = makeCtx()
     bundle.exports.apply(ctx)
     expect(ctx.remote.$mount).toHaveBeenCalled()
-    const contribution = (ctx.remote.$mount.mock.calls[0]?.[0]) as { namespace?: string }
-    expect(contribution?.namespace).toBe('security')
+    const contribution = (ctx.remote.$mount.mock.calls[0]?.[0]) as { package?: string; descriptors?: unknown[] }
+    // 真实运行时（typert registry）校验：package 必填（validateSegment 读
+    // package.length——实机回归：缺失即 Uncaught TypeError，贡献挂载失败，
+    // ctx.remote.security 不存在，设置页数据面瘫痪）。
+    expect(contribution?.package).toBe('dsh-web-security')
+    expect(Array.isArray(contribution?.descriptors)).toBe(true)
+    expect((contribution?.descriptors ?? []).length).toBeGreaterThan(0)
   })
 })
 

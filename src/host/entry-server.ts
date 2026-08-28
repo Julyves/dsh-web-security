@@ -251,6 +251,15 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
       return
     }
 
+    // 未认证的 PWA manifest：返回最小合法 JSON 而非 302（实机回归：浏览器把
+    // 登录页 HTML 当 manifest 解析 → console Syntax error；同时遵守 D2
+    // 「未认证零泄露 SPA 资产」——已认证时照常代理宿主完整 manifest）。
+    if (path === '/manifest.webmanifest' && !authGate.check(req.headers.cookie, path).authenticated) {
+      res.writeHead(200, { 'content-type': 'application/manifest+json' })
+      res.end('{}')
+      return
+    }
+
     // ── passkey API（M3）──
 
     if (path === '/security/api/passkey/login/begin' && req.method === 'POST') {

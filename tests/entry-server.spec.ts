@@ -113,6 +113,14 @@ describe('createEntryServer', () => {
       expect(() => { new Function(code) }).not.toThrow()
     }
 
+    // 未认证的 PWA manifest 请求：返回最小合法 JSON 而非 302 到登录页
+    // （实机回归：浏览器把登录页 HTML 当 manifest 解析 → console Syntax error；
+    // 同时遵守 D2「未认证零泄露 SPA 资产」——不代理宿主 manifest）。
+    const manifestResp = await fetch('http://127.0.0.1:13443/manifest.webmanifest')
+    expect(manifestResp.status).toBe(200)
+    expect(manifestResp.headers.get('content-type')).toContain('application/manifest+json')
+    expect(await manifestResp.text()).toBe('{}')
+
     await entry.stop()
   })
 

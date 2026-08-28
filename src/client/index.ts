@@ -42,9 +42,14 @@ export function apply(ctx: Context): void {
 
   // remote 贡献挂载（fire-and-forget；消费在组件 inject 闭包经
   // ctx.remote.security 动态代理——不经主 fiber inject 静态等待，防死锁）。
-  void ctx.remote.$mount(securityRemoteContribution).then((dispose) => {
-    ctx.effect(() => dispose, 'web-security: remote contribution')
-  })
+  // 失败留痕（不再 Uncaught in promise）：贡献形状错误等编程错误大声暴露。
+  void ctx.remote.$mount(securityRemoteContribution)
+    .then((dispose) => {
+      ctx.effect(() => dispose, 'web-security: remote contribution')
+    })
+    .catch((error: unknown) => {
+      console.error('web-security: remote 贡献挂载失败', error)
+    })
 
   const t = ctx.locale.bind(NS)
 

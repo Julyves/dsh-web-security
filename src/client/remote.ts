@@ -137,8 +137,14 @@ const emptyRequestSchema = z.object({})
 
 // ── Typert Remote contribution descriptor ──
 
-/** security 命名空间的 client 侧 Remote 贡献。 */
+/** security 命名空间的 client 侧 Remote 贡献。
+ *
+ * 顶层形状遵循宿主 TypertRemoteContribution（typert/protocol types.ts）：
+ * `package`（npm 包名——registry 的 validateSegment 读 package.length 必填）
+ * + `descriptors`。namespace/service 为冗余标注（真实校验只认前两者）。
+ */
 export const securityRemoteContribution = {
+  package: 'dsh-web-security',
   namespace: 'security',
   service: 'security',
   descriptors: [
