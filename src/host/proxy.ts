@@ -22,11 +22,15 @@ export interface ProxyUpstream {
   readonly port: number
 }
 
+/** 响应头注入钩子：转发前按路径改写（如 manifest 注入 cache-control）。 */
+export type ResponseHeaderPatch = (path: string, headers: Record<string, string | string[]>) => void
+
 /**
  * 创建反向代理转发器。
  * @param upstream - 上游 dsh 宿主地址。
+ * @param patchResponseHeaders - 可选响应头注入钩子（writeHead 前调用）。
  */
-export function createProxy(upstream: ProxyUpstream): {
+export function createProxy(upstream: ProxyUpstream, patchResponseHeaders?: ResponseHeaderPatch): {
   /** 转发 HTTP 请求到上游，流式回传响应。 */
   forward: (req: IncomingMessage, res: ServerResponse, clientIp: string) => Promise<void>
   /** 转发 WebSocket upgrade 到上游（原始 TCP 隧道）。 */
@@ -87,6 +91,8 @@ export function createProxy(upstream: ProxyUpstream): {
           if (Array.isArray(val)) respHeaders[key] = val
           else if (typeof val === 'string') respHeaders[key] = val
         }
+        // 响应头注入钩子（如 manifest 的 cache-control——防坏响应长存浏览器缓存）。
+        patchResponseHeaders?.(req.url ?? '/', respHeaders)
         res.writeHead(proxyRes.statusCode ?? 200, respHeaders)
         // 流式管道响应 body。
         proxyRes.pipe(res, { end: true })

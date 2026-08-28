@@ -116,10 +116,13 @@ describe('createEntryServer', () => {
     // 未认证的 PWA manifest 请求：返回最小合法 JSON 而非 302 到登录页
     // （实机回归：浏览器把登录页 HTML 当 manifest 解析 → console Syntax error；
     // 同时遵守 D2「未认证零泄露 SPA 资产」——不代理宿主 manifest）。
+    // 且禁止缓存（no-store）——坏响应不得长存（实机回归二：旧 302→HTML
+    // 响应被浏览器缓存后每次加载回放 Syntax error）。
     const manifestResp = await fetch('http://127.0.0.1:13443/manifest.webmanifest')
     expect(manifestResp.status).toBe(200)
     expect(manifestResp.headers.get('content-type')).toContain('application/manifest+json')
     expect(await manifestResp.text()).toBe('{}')
+    expect(manifestResp.headers.get('cache-control')).toBe('no-store')
 
     await entry.stop()
   })
@@ -163,6 +166,15 @@ describe('createEntryServer', () => {
     expect(protectedResp.status).toBe(200)
     expect(body).toBe('upstream-ok')
     expect(upstreamReceivedPath).toBe('/api/test')
+
+    // 已认证的 manifest 经代理转发 + 注入 no-cache（防坏响应长存缓存）。
+    const manifestResp = await fetch('http://127.0.0.1:13444/manifest.webmanifest', {
+      headers: { Cookie: cookie! },
+    })
+    expect(manifestResp.status).toBe(200)
+    expect(await manifestResp.text()).toBe('upstream-ok')
+    expect(upstreamReceivedPath).toBe('/manifest.webmanifest')
+    expect(manifestResp.headers.get('cache-control')).toBe('no-cache')
 
     await entry.stop()
   })

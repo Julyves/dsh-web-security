@@ -188,7 +188,13 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
   start: () => Promise<void>
   stop: () => Promise<void>
 } {
-  const proxy = createProxy(config.upstream)
+  // manifest 代理响应注入 no-cache（宿主自身不发 cache-control，浏览器启发式
+  // 缓存会让坏响应长存——可缓存但每次验证，防回放）。
+  const proxy = createProxy(config.upstream, (path, headers) => {
+    if (path === '/manifest.webmanifest') {
+      headers['cache-control'] = 'no-cache'
+    }
+  })
   const authGate = createAuthGate({ resolveSession: deps.resolveSession })
   const ipLimiter = createIpRateLimiter(config.maxAttempts, config.windowMs)
   let server: Server | HttpsServer | undefined
@@ -254,8 +260,9 @@ export function createEntryServer(deps: SecurityDeps, config: EntryServerConfig)
     // 未认证的 PWA manifest：返回最小合法 JSON 而非 302（实机回归：浏览器把
     // 登录页 HTML 当 manifest 解析 → console Syntax error；同时遵守 D2
     // 「未认证零泄露 SPA 资产」——已认证时照常代理宿主完整 manifest）。
+    // no-store：占位响应禁止缓存（坏响应不得长存浏览器缓存反复回放报错）。
     if (path === '/manifest.webmanifest' && !authGate.check(req.headers.cookie, path).authenticated) {
-      res.writeHead(200, { 'content-type': 'application/manifest+json' })
+      res.writeHead(200, { 'content-type': 'application/manifest+json', 'cache-control': 'no-store' })
       res.end('{}')
       return
     }

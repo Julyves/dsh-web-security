@@ -1,0 +1,16 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dependencies": {
+    "dsh-web-security": "file:/Users/gyy/CodeSpace/GitHub/dsh-web-security/release/dsh-web-security-0.1.0-test.tgz"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-web-security"
+      ]
+    }
+  }
+}
