@@ -57,9 +57,12 @@ export function createProxy(upstream: ProxyUpstream): {
     if (req.headers['origin'] !== undefined) {
       headers['origin'] = upstreamOrigin
     }
-    // 保留 upgrade 头（WebSocket 握手需要）——上面跳过了，这里加回。
+    // 保留 upgrade 握手头（WebSocket 升级必需，RFC 6455 要求 Upgrade 与
+    // Connection: Upgrade 成对——上游 node 据此触发 upgrade 事件；实机回归：
+    // 缺 Connection 头时宿主把 WS 握手当普通 GET，浏览器 events.mux/host 全断）。
     if (req.headers['upgrade'] !== undefined) {
       headers['upgrade'] = req.headers['upgrade'] as string
+      headers['connection'] = 'upgrade'
     }
     // 传递真实来源（审计 + IP 限速用）。
     headers['x-forwarded-for'] = clientIp
